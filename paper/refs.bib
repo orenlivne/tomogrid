@@ -1,14 +1,22 @@
+% Authors, titles, volumes, issues, pages and years verified September 2026
+% against publisher and indexer records (ADS, dblp, ACM DL, SIAM, Springer,
+% ScienceDirect, IEEE Xplore).  DOIs are given only where the identifier itself
+% was confirmed; entries without one were not verifiable from this network.
+
 @article{brandt1977,
   author  = {Brandt, Achi},
   title   = {Multi-level adaptive solutions to boundary-value problems},
   journal = {Mathematics of Computation},
   volume  = {31}, number = {138}, pages = {333--390}, year = {1977},
+  doi     = {10.1090/S0025-5718-1977-0431719-X},
 }
 @article{brandtlubrecht1990,
   author  = {Brandt, Achi and Lubrecht, A. A.},
-  title   = {Multilevel matrix multiplication and fast solution of integral equations},
+  title   = {Multilevel matrix multiplication and fast solution of integral
+             equations},
   journal = {Journal of Computational Physics},
   volume  = {90}, number = {2}, pages = {348--370}, year = {1990},
+  doi     = {10.1016/0021-9991(90)90171-V},
 }
 @article{brandt1991,
   author  = {Brandt, Achi},
@@ -16,6 +24,7 @@
              interactions with oscillatory kernels},
   journal = {Computer Physics Communications},
   volume  = {65}, number = {1--3}, pages = {24--38}, year = {1991},
+  doi     = {10.1016/0010-4655(91)90151-A},
 }
 @article{brandtdym1999,
   author  = {Brandt, Achi and Dym, Jordan},
@@ -24,7 +33,8 @@
   volume  = {20}, number = {4}, pages = {1417--1429}, year = {1999},
 }
 @article{brandtmann2000,
-  author  = {Brandt, Achi and Mann, Jacob and Brodski, Matvei and Galun, Meirav},
+  author  = {Brandt, Achi and Mann, Jordan and Brodski, Matvei and
+             Galun, Meirav},
   title   = {A fast and accurate multilevel inversion of the {R}adon transform},
   journal = {SIAM Journal on Applied Mathematics},
   volume  = {60}, number = {2}, pages = {437--462}, year = {2000},
@@ -34,24 +44,29 @@
   title   = {An inversion formula for the attenuated {X}-ray transformation},
   journal = {Arkiv f{\"o}r Matematik},
   volume  = {40}, number = {1}, pages = {145--167}, year = {2002},
+  doi     = {10.1007/BF02384507},
 }
 @book{natterer2001,
   author    = {Natterer, Frank},
   title     = {The Mathematics of Computerized Tomography},
-  publisher = {SIAM}, year = {2001},
+  series    = {Classics in Applied Mathematics},
+  volume    = {32},
+  publisher = {SIAM}, address = {Philadelphia}, year = {2001},
 }
 @article{sheppvardi1982,
   author  = {Shepp, L. A. and Vardi, Y.},
   title   = {Maximum likelihood reconstruction for emission tomography},
   journal = {IEEE Transactions on Medical Imaging},
   volume  = {1}, number = {2}, pages = {113--122}, year = {1982},
+  note    = {Printed as volume MI-1},
 }
 @article{hudsonlarkin1994,
-  author  = {Hudson, H. M. and Larkin, R. S.},
+  author  = {Hudson, H. Malcolm and Larkin, Richard S.},
   title   = {Accelerated image reconstruction using ordered subsets of
              projection data},
   journal = {IEEE Transactions on Medical Imaging},
   volume  = {13}, number = {4}, pages = {601--609}, year = {1994},
+  doi     = {10.1109/42.363108},
 }
 @article{gordon1970,
   author  = {Gordon, Richard and Bender, Robert and Herman, Gabor T.},
@@ -59,6 +74,7 @@
              electron microscopy and {X}-ray photography},
   journal = {Journal of Theoretical Biology},
   volume  = {29}, number = {3}, pages = {471--481}, year = {1970},
+  doi     = {10.1016/0022-5193(70)90109-8},
 }
 @article{greengardrokhlin1987,
   author  = {Greengard, Leslie and Rokhlin, Vladimir},
@@ -68,10 +84,11 @@
 }
 @article{basubresler2000,
   author  = {Basu, Samit and Bresler, Yoram},
-  title   = {{$O(N^2\log N)$} filtered backprojection reconstruction algorithm
-             for tomography},
+  title   = {{$O(N^2\log_2 N)$} filtered backprojection reconstruction
+             algorithm for tomography},
   journal = {IEEE Transactions on Image Processing},
-  volume  = {9}, number = {10}, pages = {1760--1773}, year = {2000},
+  volume  = {9}, number = {10}, pages = {1760--1772}, year = {2000},
+  doi     = {10.1109/83.869187},
 }
 @article{averbuch2008,
   author  = {Averbuch, A. and Coifman, R. R. and Donoho, D. L. and
@@ -80,4 +97,15 @@
              pseudopolar {F}ourier transform},
   journal = {SIAM Journal on Scientific Computing},
   volume  = {30}, number = {2}, pages = {764--784}, year = {2008},
+  doi     = {10.1137/060650283},
+}
+
+@misc{tomogrid,
+  author       = {Livne, Oren E. and Brandt, Achi},
+  title        = {\texttt{tomogrid}: multilevel evaluation of the attenuated
+                  {R}adon transform},
+  year         = {2026},
+  note         = {Version 0.1.0. Reference implementation, test suite and the
+                  scripts producing every table and figure of this paper},
+  howpublished = {\url{https://github.com/orenlivne/tomogrid}},
 }

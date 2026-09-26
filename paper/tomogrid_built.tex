@@ -22,9 +22,13 @@
 \title{A multilevel $\bigO(N\log N)$ algorithm for evaluating the
 attenuated Radon transform}
 \author{%
-  Oren E. Livne\thanks{Corresponding author.}
+  Oren E. Livne\thanks{Pine Birch Analytics, 35 Kelinger Rd, Churchville,
+    PA 18966-1033, USA
+    (\texttt{oren.livne@gmail.com}, +1 312 533 9130). Corresponding author.}
   \and
-  (draft --- authorship and affiliations to be completed)
+  Achi Brandt\thanks{Department of Computer Science and Applied Mathematics,
+    The Weizmann Institute of Science, Rehovot 7610001, Israel
+    (\texttt{achi.brandt@weizmann.ac.il}).}
 }
 \date{\today}
 
@@ -173,10 +177,10 @@ solves the same problem by a different decomposition. For line integrals
 specifically, Brandt and Dym \citep{brandtdym1999} gave an $\bigO(N\log N)$
 algorithm based on recursive doubling of segment length, and Brandt et al.\
 \citep{brandtmann2000} built a multilevel inversion of the unattenuated Radon
-transform on it. Fast backprojection by hierarchical decomposition
-\citep{basubresler2000} and transforms built on the pseudopolar grid
-\citep{averbuch2008} achieve comparable asymptotics for the unattenuated
-transform.
+transform on it. Fast backprojection by hierarchical decomposition, at
+$\bigO(N\log^2 N)$ \citep{basubresler2000}, and transforms built on the
+pseudopolar grid \citep{averbuch2008} achieve comparable asymptotics for the
+unattenuated transform.
 
 The contribution here is the extension to the attenuated transform
 \eqref{eq:art}, where the smoothness of the exponent and of the integrand must
@@ -198,9 +202,9 @@ be exploited together. Specifically:
   the method is built around, but by the resampling of the tables in the
   transverse and along-ray variables when the ray frame rotates.
 \end{enumerate}
-An open-source reference implementation and the scripts that produce every
-number and figure below are available at
-\url{https://github.com/orenlivne/tomogrid}.
+An open-source reference implementation, together with the scripts that
+produce every number and figure below, is available
+as~\citep{tomogrid}.
 
 \section{Segment integrals and the concatenation identity}
 \label{sec:identity}
@@ -768,15 +772,27 @@ evaluation at moderate resolution and improving as $\bigO(\sqrt{N}/\log N)$.
 
 \subsection*{Acknowledgements}
 
-The approach follows the multilevel integral-transform framework developed by
-Achi Brandt and collaborators, and an unpublished scheme for this problem
-communicated by Achi Brandt to the first author.
+The construction extends the multilevel integral-transform framework
+of~\citep{brandtlubrecht1990,brandt1991} and the segment-doubling idea
+of~\citep{brandtdym1999} to the attenuated case.
 
 \subsection*{Reproducibility}
 
-Code, tests and the scripts producing every table and figure are at
-\url{https://github.com/orenlivne/tomogrid}. The scaling study is
-\texttt{python -m experiments.scaling}.
+Every number, table and figure in Section~\ref{sec:results} is generated from
+committed data by the scripts in~\citep{tomogrid}:
+
+\begin{verbatim}
+  python -m pytest tests -q --runslow   # verification suite
+  python -m experiments.scaling         # Tables 2-4, Figures 1-2
+  python -m experiments.battery         # Table 1
+  cd paper && make                      # rebuild this document from the CSVs
+\end{verbatim}
+
+\noindent
+The experiment scripts write CSV files to \texttt{experiments/results/};
+\texttt{paper/make\_tables.py} and \texttt{paper/make\_figures.py} read those
+files and emit the tables and figures, so no number in this paper is
+transcribed by hand.
 
 \bibliographystyle{plainnat}
 \bibliography{refs}

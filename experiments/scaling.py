@@ -188,14 +188,25 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--knobs-only", action="store_true")
+    ap.add_argument("--skip-knobs", action="store_true",
+                    help="leave results/knobs.csv untouched")
+    ap.add_argument("--grids", type=int, nargs="+",
+                    help="override the refinement grid sequence")
+    ap.add_argument("--direct-max", type=int,
+                    help="largest grid on which to run direct evaluation; above "
+                         "this the operation count comes from the schedule")
     args = ap.parse_args()
 
     if args.quick:
         grids, direct_max, n_samples, knob_n = [33, 65], 65, 2049, 33
         model_grids = [65, 129, 257, 513]
     else:
-        grids, direct_max, n_samples, knob_n = [33, 65, 129, 257], 129, 4097, 129
+        grids, direct_max, n_samples, knob_n = [33, 65, 129, 257, 513], 257, 4097, 129
         model_grids = [65, 129, 257, 513, 1025, 2049, 4097]
+    if args.grids:
+        grids = args.grids
+    if args.direct_max is not None:
+        direct_max = args.direct_max
 
     OUT.mkdir(exist_ok=True)
     t0 = time.perf_counter()
@@ -212,9 +223,9 @@ def main():
     ref_rows = refinement_study(grids, direct_max, n_samples)
     write_csv(OUT / "refinement.csv", ref_rows)
 
-    print("\n=== knob study ===", flush=True)
-    knob_rows = knob_study(knob_n, n_samples)
-    write_csv(OUT / "knobs.csv", knob_rows)
+    if not args.skip_knobs:
+        print("\n=== knob study ===", flush=True)
+        write_csv(OUT / "knobs.csv", knob_study(knob_n, n_samples))
 
     print("\n=== cost model extrapolation ===", flush=True)
     model_rows = model_extrapolation(model_grids)
