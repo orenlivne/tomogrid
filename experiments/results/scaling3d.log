@@ -1,0 +1,9 @@
+[grid 9^3] m_out=9 m_min=5 sigma=2
+   multilevel     71.1 s     11.33 Gflop
+   direct         41.8 s      3.84 Gflop
+   e_tot=3.484e-01 e_alg=4.581e-02 e_disc=3.612e-01
+[grid 17^3] m_out=9 m_min=5 sigma=2
+   multilevel    501.0 s     82.86 Gflop
+   direct        285.7 s     28.08 Gflop
+   e_tot=1.124e-01 e_alg=1.686e-02 e_disc=1.130e-01
+[grid 33^3] m_out=9 m_min=5 sigma=2
