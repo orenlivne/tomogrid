@@ -1,0 +1,654 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,allcolors=blue]{hyperref}
+
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+
+\DeclareMathOperator{\supp}{supp}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\bk}{\mathbf{k}}
+\newcommand{\om}{\boldsymbol{\omega}}
+\newcommand{\omp}{\om^{\perp}}
+\newcommand{\Rmu}{\mathcal{R}_{\mu}}
+\newcommand{\bigO}{\mathcal{O}}
+
+\title{A multilevel $\bigO(N\log N)$ algorithm for evaluating the
+attenuated Radon transform}
+\author{%
+  Oren E. Livne\thanks{Corresponding author.}
+  \and
+  (draft --- authorship and affiliations to be completed)
+}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The forward operator of emission tomography is the attenuated Radon transform,
+in which the attenuation enters through an exponential whose argument varies
+along the line of integration. Evaluating it on an $n\times n$ grid for
+$\bigO(n)$ directions costs $\bigO(n^3)=\bigO(N^{3/2})$ operations by direct
+quadrature, where $N=n^2$, and this evaluation is the inner loop of every
+iterative reconstruction method. We give an $\bigO(N\log N)$ algorithm in the
+multilevel integral-transform framework of Brandt and Lubrecht. The algorithm
+rests on an exact concatenation identity for a triple of segment integrals,
+which lets the length of the integration segment double from level to level
+with no approximation, and on the observation that a segment of length $\ell$
+resolves direction only to $\delta\theta\sim h/\ell$, so that short segments
+require few directions. Angular resolution is therefore doubled at the finest
+levels in step with the segment length and the coarsest levels perform exact
+merges only. We identify the quantities that must be interpolated --- the
+attenuation exponent rather than its exponential, and a segment integral
+referenced to its own exit point rather than to its midpoint --- and show that
+the alternatives are unstable. Numerical experiments on a battery of
+attenuation and activity phantoms confirm the predicted cost and show that the
+error introduced by the multilevel schedule is an order of magnitude below the
+discretisation error of the underlying grid by a factor of six to twelve, at a
+cost already $2.9\times$ lower in operations and $4.5\times$ lower in wall time
+at $n=129$, with the ratio falling as $\bigO(\log N/\sqrt{N})$.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+\subsection{The forward model}
+
+Emission tomography reconstructs the spatial distribution of a radiotracer
+from counts of the photons it emits. Two fields are involved: the activity
+$f(\bx)\ge 0$, which is the unknown, and the linear attenuation coefficient
+$\mu(\bx)\ge 0$ of the surrounding medium at the photon energy, which is
+usually measured separately by a transmission or CT scan.
+
+Parameterise a line in $\mathbb{R}^2$ by a direction and a signed offset,
+\begin{equation}
+  \om(\theta)=(\cos\theta,\sin\theta),\qquad
+  \omp(\theta)=(-\sin\theta,\cos\theta),\qquad
+  \bx(s,t)=s\,\omp+t\,\om ,
+\end{equation}
+and traverse $L(\theta,s)=\{\bx(s,t):t\in\mathbb{R}\}$ in the direction of
+increasing $t$. A photon emitted at $\bx(s,t)$ and travelling along $\om$
+escapes with probability $\exp(-\int_t^{\infty}\mu)$, so the expected count
+along $L(\theta,s)$ is
+\begin{equation}
+  (\Rmu f)(\theta,s)
+  = \int_{\mathbb{R}} f\big(\bx(s,t)\big)\,
+    \exp\!\left(-\int_t^{\infty}\mu\big(\bx(s,\tau)\big)\,d\tau\right) dt .
+  \label{eq:art}
+\end{equation}
+This is the attenuated Radon transform, also called the attenuated X-ray
+transform. Its distinguishing feature is that the exponent depends on the
+emission point $t$, so the attenuation does not factor out of the integral.
+Equation~\eqref{eq:art} is the forward model of single-photon emission
+computed tomography (SPECT).
+
+Positron emission tomography (PET) detects two collinear annihilation photons
+in coincidence. Both must escape, in opposite directions, so the survival
+probability is $\exp(-\int_t^{\infty}\mu)\exp(-\int_{-\infty}^{t}\mu)
+=\exp(-\int_L\mu)$, independent of $t$, and
+\begin{equation}
+  (\mathcal{P}_{\mu}f)(\theta,s)
+  = \exp\!\left(-\int_L \mu\right)\int_L f .
+  \label{eq:pet}
+\end{equation}
+Classical PET attenuation is thus a multiplicative factor per line. The
+algorithm below computes the three line integrals
+\begin{equation}
+  S=\int_L f,\qquad E=\int_L\mu,\qquad I=(\Rmu f)(\theta,s),
+  \label{eq:three}
+\end{equation}
+and therefore delivers both models: \eqref{eq:art} is $I$, and \eqref{eq:pet}
+is $e^{-E}S$. The exponent is genuinely position-dependent only in
+\eqref{eq:art}, and that is the case treated here; \eqref{eq:pet} is recovered
+as a by-product at no extra cost. Time-of-flight PET, in which the coincidence
+is localised along the line and the two one-sided attenuations no longer
+combine into a constant, has the structure of \eqref{eq:art} and is covered by
+the same machinery.
+
+\subsection{The inverse problem and where evaluation enters}
+\label{sec:motivation}
+
+With $\mu$ known, \eqref{eq:art} is a linear Fredholm integral equation of the
+first kind for $f$,
+\begin{equation}
+  \Rmu f = g ,
+  \label{eq:inverse}
+\end{equation}
+where $g$ is the measured sinogram. Novikov \citep{novikov2002} gave an
+explicit inversion formula for $\Rmu$, and for the unattenuated case
+$\mu\equiv 0$ the classical filtered-backprojection inversion of the Radon
+transform applies \citep{natterer2001}. In practice \eqref{eq:inverse} is
+solved iteratively rather than by an inversion formula, because the data are
+Poisson counts, because the system is large and ill-conditioned, and because
+regularisation and physical corrections are easier to impose inside an
+iteration.
+
+The standard methods are all of this kind. The expectation-maximisation
+algorithm for the Poisson likelihood \citep{sheppvardi1982} updates
+\begin{equation}
+  f^{(k+1)} = \frac{f^{(k)}}{\Rmu^{*}\mathbf{1}}\;
+              \Rmu^{*}\!\left(\frac{g}{\Rmu f^{(k)}}\right),
+  \label{eq:mlem}
+\end{equation}
+a multiplicative --- hence nonlinear --- relaxation; its ordered-subset
+variant \citep{hudsonlarkin1994} applies \eqref{eq:mlem} over subsets of
+directions in sequence, which makes it a block row-action scheme in the family
+of algebraic reconstruction techniques \citep{gordon1970}, i.e.\ a Kaczmarz
+relaxation with a nonlinear update. Every sweep of every one of these methods
+applies $\Rmu$ once and its adjoint once. The cost of the reconstruction is
+therefore a small multiple of the cost of evaluating $\Rmu$, and an
+$\bigO(N^{3/2})$ evaluation caps the resolution that is reachable.
+
+Two further considerations motivate a multilevel evaluation specifically
+rather than any fast evaluation. First, if $\mu$ is not measured separately
+but estimated jointly with $f$ from the emission data, the problem becomes
+nonlinear in $\mu$, since $\mu$ sits in the exponent; the natural solver is
+then a full approximation scheme (FAS) \citep{brandt1977} in which the
+nonlinearity is handled on a hierarchy of grids. Second, a row-action
+relaxation of \eqref{eq:inverse} is a smoother in the multigrid sense: it
+reduces the components of the residual that the fine grid resolves, and leaves
+the smooth components to be handled on coarser grids, so a full multigrid
+(FMG) cycle over the image hierarchy is the natural outer solver. The level
+hierarchy constructed here --- segment lengths paired with angular resolutions
+--- is the same hierarchy such a solver would traverse, which is what makes the
+evaluation and the solver composable. We do not develop the solver in this
+paper. The present contribution is the forward evaluation; the adjoint, the
+nonlinear inversion and the FAS/FMG cycle are the subject of subsequent work
+(Section~\ref{sec:discussion}).
+
+\subsection{Related work and contribution}
+
+Fast summation by separating a smooth kernel on a hierarchy of grids is the
+subject of the multilevel matrix-multiplication framework of Brandt and
+Lubrecht \citep{brandtlubrecht1990} and its extension to oscillatory kernels
+\citep{brandt1991}; the fast multipole method \citep{greengardrokhlin1987}
+solves the same problem by a different decomposition. For line integrals
+specifically, Brandt and Dym \citep{brandtdym1999} gave an $\bigO(N\log N)$
+algorithm based on recursive doubling of segment length, and Brandt et al.\
+\citep{brandtmann2000} built a multilevel inversion of the unattenuated Radon
+transform on it. Fast backprojection by hierarchical decomposition
+\citep{basubresler2000} and transforms built on the pseudopolar grid
+\citep{averbuch2008} achieve comparable asymptotics for the unattenuated
+transform.
+
+The contribution here is the extension to the attenuated transform
+\eqref{eq:art}, where the smoothness of the exponent and of the integrand must
+be exploited together. Specifically:
+\begin{enumerate}
+\item an exact concatenation identity (Proposition~\ref{prop:merge}) for a
+  triple of segment integrals, which makes the doubling of segment length
+  exact and, in addition, damping: an error committed upstream is multiplied by
+  $e^{-E}\le 1$ at every merge;
+\item identification of the quantities that admit interpolation --- the
+  exponent $E$ rather than $e^{-E}$, and an exit-referenced rather than
+  midpoint-referenced attenuated integral --- with the failure mode of each
+  alternative;
+\item a sampling analysis of the three axes (direction, transverse offset,
+  position along the ray) which fixes the level schedule and shows that the
+  angular refinement must be placed at the finest levels, not the coarsest;
+\item a measured account of the resulting accuracy and cost, including the
+  finding that the error budget is dominated not by the angular interpolation
+  the method is built around, but by the resampling of the tables in the
+  transverse and along-ray variables when the ray frame rotates.
+\end{enumerate}
+An open-source reference implementation and the scripts that produce every
+number and figure below are available at
+\url{https://github.com/orenlivne/tomogrid}.
+
+\section{Segment integrals and the concatenation identity}
+\label{sec:identity}
+
+The algorithm works with integrals over finite segments of a ray rather than
+over whole lines. Fix $(\theta,s)$ and write $f(t)$, $\mu(t)$ for the
+restrictions to that ray. For $a<b$ define
+\begin{equation}
+  E[a,b]=\int_a^b\mu(\tau)\,d\tau,\qquad
+  S[a,b]=\int_a^b f(t)\,dt,\qquad
+  I[a,b]=\int_a^b f(t)\,e^{-\int_t^b\mu(\tau)d\tau}\,dt .
+  \label{eq:triple}
+\end{equation}
+The attenuation in $I$ is referenced to the segment's own exit point $b$, so
+every weight lies in $(0,1]$. This choice is what makes the recursion stable
+(Remark~\ref{rem:reference}).
+
+\begin{proposition}[Concatenation]
+\label{prop:merge}
+For any $c\in(a,b)$,
+\begin{equation}
+  E[a,b]=E[a,c]+E[c,b],\qquad
+  S[a,b]=S[a,c]+S[c,b],\qquad
+  I[a,b]=e^{-E[c,b]}\,I[a,c]+I[c,b].
+  \label{eq:merge}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+The first two are additivity of the integral. For the third, split at $c$. For
+$t\in[a,c]$ write $\int_t^b\mu=\int_t^c\mu+\int_c^b\mu$; the second term does
+not depend on $t$ and factors out as $e^{-E[c,b]}$, leaving $I[a,c]$. For
+$t\in[c,b]$ the integrand is unchanged and contributes $I[c,b]$.
+\end{proof}
+
+Equivalently, the lower-triangular matrices
+\begin{equation}
+  M[a,b]=\begin{pmatrix} e^{-E[a,b]} & 0\\ I[a,b] & 1\end{pmatrix}
+  \qquad\text{satisfy}\qquad
+  M[a,b]=M[a,c]\,M[c,b],
+\end{equation}
+so the triple $(S,E,I)$ carries a semigroup structure under concatenation.
+Identity \eqref{eq:merge} involves no quadrature and no interpolation: given
+the triples of two adjacent segments, the triple of their union is obtained
+exactly. This is what permits the segment length to double from level to level
+at no cost in accuracy.
+
+\begin{remark}[Why $I$ is referenced to the exit point]
+\label{rem:reference}
+Referencing the attenuation to the segment midpoint $m$, i.e.\ using
+$\tilde I[a,b]=\int_a^b f(t)e^{-\int_t^m\mu}dt$, gives weights as large as
+$e^{+E[a,m]}$, which grow without bound with segment length and attenuation
+strength. With the exit-referenced definition \eqref{eq:triple} all weights are
+in $(0,1]$, and \eqref{eq:merge} shows that an error $\varepsilon$ in $I[a,c]$
+propagates into $I[a,b]$ as $e^{-E[c,b]}\varepsilon$. Strong attenuation
+therefore improves the conditioning of the recursion. This is confirmed in
+Section~\ref{sec:battery}: the phantom with the largest attenuation gives the
+smallest error.
+\end{remark}
+
+\begin{remark}[Why $E$ and not $e^{-E}$ is interpolated]
+\label{rem:exponent}
+$E$ is an additive line integral of $\mu$, smoothed along the ray by the
+averaging in \eqref{eq:triple}, with derivatives bounded in terms of those of
+$\mu$. Its exponential spans many orders of magnitude --- in the experiments
+below $E$ reaches $12$, so $e^{-E}\approx 6\times 10^{-6}$ --- and has
+correspondingly large relative derivatives. The algorithm interpolates $E$ and
+applies the exponential afterwards. This is the sense in which smoothness is
+used twice: once in the exponent, through $E$, and once in the integrand,
+through $I$.
+\end{remark}
+
+\section{Smoothness and sampling}
+\label{sec:sampling}
+
+Let $Q(\theta)$ denote a segment integral of length $\ell$ centred at a fixed
+point $\bx$, as a function of the segment's direction. For a single Fourier
+mode $f=e^{i\bk\cdot\mathbf{y}}$ with $|\bk|=k$,
+\begin{equation}
+  Q(\theta)=\int_{-\ell/2}^{\ell/2} e^{i\bk\cdot(\bx+\tau\om(\theta))}d\tau
+  = e^{i\bk\cdot\bx}\,\ell\,
+    \operatorname{sinc}\!\left(\tfrac{\ell k}{2}\cos(\theta-\phi)\right),
+  \qquad \phi=\arg\bk .
+  \label{eq:sinc}
+\end{equation}
+The $\theta$-dependence enters only through $u(\theta)=\frac{\ell k}{2}
+\cos(\theta-\phi)$, with $|du/d\theta|\le \ell k/2$, and $\operatorname{sinc}$
+varies on unit scale in $u$. Hence $Q$ varies in $\theta$ on the scale
+$\delta\theta\sim 2/(\ell k)$. With the finest scale representable on a grid of
+spacing $h$ being $k_{\max}\sim\pi/h$, the angular sampling requirement is
+\begin{equation}
+  \boxed{\;\delta\theta_\ell\,\ell \lesssim c\,h,\qquad c=\bigO(1).\;}
+  \label{eq:angcrit}
+\end{equation}
+Geometrically \eqref{eq:angcrit} says that the endpoints of the segment must
+not move by more than about one grid cell between neighbouring directions.
+Short segments need few directions.
+
+The other two axes follow from the same expression. Transverse to the ray no
+averaging takes place, so the sample spacing $\delta s$ must resolve $f$
+itself. Along the ray, $Q$ is a box average of length $\ell$, whose transfer
+function is $\operatorname{sinc}(k\ell/2)$; this is not a strong low-pass
+filter, since at the Nyquist frequency $k=\pi/\ell$ of a grid with
+$\delta t=\ell$ it still equals $2/\pi\approx0.64$. Sampling the tables at
+$\delta t=\ell$ therefore aliases. Taking
+\begin{equation}
+  \delta t=\ell/\nu,\qquad \nu=2,
+  \label{eq:tcrit}
+\end{equation}
+places the grid Nyquist frequency exactly at the first zero of
+$\operatorname{sinc}(k\ell/2)$. Section~\ref{sec:knobs} confirms that $\nu=2$
+is both necessary and sufficient: $\nu=4$ and $\nu=8$ give no further
+improvement. Segments at a given level consequently overlap by half.
+
+\section{The algorithm}
+\label{sec:algorithm}
+
+\subsection{Hierarchy}
+
+Let the support of $f$ and $\mu$ lie in the disc of radius $R$ and let
+$H>R$ be a half-chord that covers any line of interest. Levels
+$l=0,\dots,L$ carry segments of length
+\begin{equation}
+  \ell_l = 2^{\,l}\ell_0,\qquad \ell_0\approx h,\qquad \ell_L = 2H .
+\end{equation}
+Level $l$ stores, for each direction $\theta_k$ on a grid $\Theta_l$, a table
+of the triple \eqref{eq:triple} over $(s,t)$, where $t$ is the segment centre.
+The grids are
+\begin{equation}
+  \delta s = h/\sigma,\qquad
+  \delta t_l = \ell_l/\nu,\qquad
+  |\Theta_l| = \min\big(n_\theta,\; n_\theta^{\min}2^{\,l}\big),
+  \label{eq:schedule}
+\end{equation}
+with $\Theta_l=\{2\pi i/|\Theta_l| \}$ so that $\Theta_{l-1}\subset\Theta_l$,
+and $t$-grids $t_j=-H+j\,\delta t_l$ so that the level-$l$ grid is every second
+node of the level-$(l-1)$ grid.
+
+The last entry of \eqref{eq:schedule} is the scheduling rule, and its direction
+is the point that is easy to get backwards. By \eqref{eq:angcrit} long segments
+need many directions and short ones few, so the angular grid is doubled at the
+\emph{finest} levels, in step with the doubling of $\ell_l$. While the
+doubling is active,
+\begin{equation}
+  \delta\theta_{l-1}\,\ell_{l-1}
+  = \frac{2\pi}{n_\theta^{\min}2^{\,l-1}}\cdot \ell_0 2^{\,l-1}
+  = \frac{2\pi\ell_0}{n_\theta^{\min}} ,
+  \label{eq:constant}
+\end{equation}
+independent of $l$: every refinement faces the same criterion, and with
+$\ell_0\approx h$ the constant in \eqref{eq:angcrit} is
+$c=2\pi/n_\theta^{\min}$. A single parameter, $n_\theta^{\min}$, controls the
+angular interpolation error. Once \eqref{eq:schedule} saturates at $n_\theta$,
+the remaining levels perform exact merges only and contribute no error at all.
+Setting $n_\theta^{\min}=n_\theta$ disables every interpolation and recovers
+direct evaluation, which is how the reference solutions in
+Section~\ref{sec:results} are computed.
+
+\subsection{Level transition}
+
+Each level transition consists of an angular prolongation followed by a merge.
+
+\paragraph{(A) Angular prolongation.}
+$\Theta_{l-1}\subset\Theta_l$, so half the directions of $\Theta_l$ are copies
+of level-$(l-1)$ directions and are taken over exactly. Each new direction
+$\theta$ is the midpoint of two old ones, and its table is obtained by
+interpolation in $\theta$ over a stencil of $q$ old directions. The
+interpolation must be performed at a fixed \emph{spatial} point: the value of
+the old table at direction $\theta'$ is needed at
+$s'=\bx\cdot\omp(\theta')$, $t'=\bx\cdot\om(\theta')$ where
+$\bx=s\,\omp(\theta)+t\,\om(\theta)$, which requires a two-dimensional
+interpolation in the old frame's $(s,t)$ grid. Interpolating in $\theta$ at
+fixed \emph{ray} coordinates instead would rotate the segment centre on a
+circle of radius $|\bx|=\bigO(1)$ and, by \eqref{eq:sinc}, force
+$\delta\theta\lesssim h$ at every level, destroying the complexity.
+
+\paragraph{(B) Merge.}
+At each direction, the level-$l$ segment centred at level-$(l-1)$ node index
+$2j$ is the union of the level-$(l-1)$ segments centred at $2j\mp\nu/2$; the
+offset $\ell_{l-1}/2$ is an integer number of grid steps precisely because
+$\nu$ is even. The triples are combined by \eqref{eq:merge}. No interpolation
+in $t$ occurs, and the step is exact.
+
+\subsection{Finest level}
+
+Level-0 segments have length $\approx h$ and are evaluated directly. Place $m$
+Gauss--Legendre nodes $\{t_i\}$ with weights $\{w_i\}$ on the segment, sample
+$f$ and $\mu$ there by tensor-product interpolation from the image grid, and
+take
+\begin{equation}
+  E=\frac{\ell}{2}\sum_j w_j\mu_j,\qquad
+  S=\frac{\ell}{2}\sum_j w_j f_j,\qquad
+  A_i=\frac{\ell}{2}\sum_j C_{ij}\mu_j,\qquad
+  I=\frac{\ell}{2}\sum_i w_i f_i e^{-A_i},
+  \label{eq:level0}
+\end{equation}
+where $C_{ij}=\int_{t_i}^{b}L_j$ and $L_j$ is the Lagrange basis on the nodes.
+$A_i$ approximates $\int_{t_i}^{b}\mu$ to order $m$ from the same $m$ samples,
+so the partial attenuations needed by $I$ cost one $m\times m$ matrix
+application per segment. Note that \eqref{eq:level0} is accurate only while
+$\mu\ell$ is moderate --- an $8$-node rule applied to a whole chord with
+$E=30$ has relative error $10^{-3}$ --- which is precisely why the direct
+quadrature is confined to the shortest segments and everything above is the
+exact recursion \eqref{eq:merge}.
+
+\begin{algorithm}[t]
+\caption{Multilevel evaluation of \eqref{eq:three}}
+\label{alg:main}
+\begin{algorithmic}[1]
+\State build level-0 tables by \eqref{eq:level0} on $\Theta_0\times\{s\}\times\{t\}$
+\For{$l=1,\dots,L$}
+  \State \textbf{(A)} copy tables at $\Theta_{l-1}$; interpolate the remaining
+         directions of $\Theta_l$ in $(\theta,s,t)$
+  \State \textbf{(B)} merge node pairs $2j\mp\nu/2$ by \eqref{eq:merge}
+\EndFor
+\State \Return the level-$L$ table at $t=0$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Zero extension}
+
+Outside the tables the triples are taken to be zero. This is exact rather than
+an approximation: if $|s'|>R$ the whole line misses the support, and if
+$|t'|>H\ge R+\ell/2$ the segment does. The interpolation stencils may therefore
+straddle the table boundary without loss, provided $f$ and $\mu$ vanish
+smoothly; a field with a jump violates the smoothness on which every
+interpolation in the method depends, and the order degrades accordingly
+(Section~\ref{sec:knobs}).
+
+\subsection{Complexity}
+\label{sec:complexity}
+
+Work at level $l$ is proportional to the table size $|\Theta_l|\,n_s\,n_t^{(l)}$
+with $n_t^{(l)}=\nu\,2^{\,L-l}+1$. Writing $M=2^L\approx 2H/h$ and
+$l^{*}=\log_2(n_\theta/n_\theta^{\min})$,
+\begin{equation}
+  |\Theta_l|\,n_t^{(l)} \approx
+  \begin{cases}
+    n_\theta^{\min} \nu M, & l\le l^{*}\quad\text{(refining)},\\[2pt]
+    n_\theta\,\nu M/2^{\,l}, & l>l^{*}\quad\text{(coasting)} .
+  \end{cases}
+\end{equation}
+The refining levels each cost the same and the coasting levels decay
+geometrically, so
+\begin{equation}
+  W_{\mathrm{ML}}
+  = \bigO\!\big(n_\theta^{\min}\,\nu\,M\,n_s\,(l^{*}+2)\big)
+  = \bigO(N\log N),\qquad N=n^2\approx M n_s ,
+  \label{eq:cost}
+\end{equation}
+against $W_{\mathrm{direct}}=\bigO(n_\theta n_s M)=\bigO(N^{3/2})$. The
+constant per refining level is $q\,p_s\,p_t$ table lookups, where $p_s,p_t$ are
+the stencil widths.
+
+\section{Numerical results}
+\label{sec:results}
+
+All experiments use the reference implementation in
+\texttt{tomogrid}: cubic ($4$-point) stencils throughout, $m=8$
+Gauss--Legendre nodes per level-0 segment, $\nu=2$, $\sigma=2$,
+$n_\theta^{\min}=16$ unless stated, $H=1$, images on $[-1,1]^2$. Directions are
+uniform on $[0,2\pi)$; the full circle is required because \eqref{eq:art} is
+not invariant under $\theta\mapsto\theta+\pi$, unlike $S$ and $E$.
+
+Three errors are reported, all measured in the supremum norm over the sinogram
+and normalised by $\max|S|$, which is the physically meaningful scale since $I$
+itself underflows on heavily attenuated rays:
+\begin{align*}
+  e_{\mathrm{alg}}  &: \text{multilevel vs direct evaluation on the \emph{same} discretisation};\\
+  e_{\mathrm{disc}} &: \text{direct evaluation vs the continuum};\\
+  e_{\mathrm{tot}}  &: \text{multilevel vs the continuum}.
+\end{align*}
+Separating them matters: $e_{\mathrm{alg}}$ is what the multilevel schedule
+costs, and it is the only quantity the algorithm controls.
+
+\subsection{Verification}
+
+The continuum reference is a dense trapezoidal evaluation of the analytic
+phantom. On the $C^\infty$ compactly supported fields used here every
+Euler--Maclaurin boundary term vanishes and the rule is spectrally accurate:
+against the closed-form Radon transform of a Gaussian with uniform attenuation
+it agrees to $2\times10^{-14}$, and doubling its sample count changes the
+result by INPUT_REFDRIFT.
+
+The exactness claims are verified independently. Proposition~\ref{prop:merge}
+reproduces whole-segment triples from split ones to $10^{-13}$; the nested
+$t$-grid bookkeeping of step (B) reproduces directly computed coarse-level
+tables to $10^{-12}$ for $\nu\in\{2,4,8\}$; and the physical limits hold to
+roundoff --- with $\mu\equiv0$ the computed $I$ equals $S$ to $10^{-12}$, and
+when the attenuator lies entirely downstream of the source the SPECT model
+collapses onto the PET model $e^{-E}S$ to $10^{-10}$, while for the reversed
+direction $I=S$ to the same tolerance.
+
+\subsection{Attenuation battery}
+\label{sec:battery}
+
+Table~\ref{tab:battery} reports $e_{\mathrm{alg}}$ over nine attenuation fields
+crossed with four activity fields on a deliberately coarse $33^2$ grid with
+$n_\theta^{\min}=8$, where the method is under maximum stress. The fields
+include a uniform soft-edged disc, single and multiple blobs, a high-contrast
+case, an anisotropic blob with large $|\nabla\mu|$ in one direction, a linear
+gradient, a short-wavelength oscillatory field, and a case with chord
+attenuation $E\approx 12$.
+
+INPUT_BATTERY
+
+The error varies by a factor of six across the battery, and short-wavelength
+$\mu$ is no worse than smooth $\mu$. The strongly attenuating case gives the
+\emph{smallest} error in $I$, as predicted by Remark~\ref{rem:reference}: the
+factor $e^{-E[c,b]}$ in \eqref{eq:merge} damps upstream error. The worst case
+is the high-contrast field, consistent with the interpolation constant growing
+with $|\nabla\mu|$.
+
+\subsection{Refinement}
+\label{sec:refinement}
+
+Table~\ref{tab:refine} and Figure~\ref{fig:scaling} report the refinement
+study: a fixed phantom (three blobs through a high-contrast attenuator, peak
+chord attenuation $E\approx3.1$) on grids $n=33,65,129,257$ with
+$n_\theta=n-1$, $n_s=n$ and $n_\theta^{\min}=16$ held fixed.
+
+INPUT_REFINE
+
+INPUT_FIGURE
+
+Two observations. First, $e_{\mathrm{alg}}$ is a factor of six to twelve below
+$e_{\mathrm{disc}}$ at every resolution, so the multilevel schedule is
+not what limits the accuracy of the computed sinogram; the discretisation of
+the image is. Second, both errors converge under refinement, which is the
+property that makes the method usable: the multilevel error is not a fixed
+tolerance but goes to zero with the mesh.
+
+The observed orders are pre-asymptotic on this phantom, which contains a blob
+of radius $0.22$ that is under-resolved at $n=33$. On a well-resolved smooth
+phantom (a single $C^\infty$ bump of radius $0.7$) the discretisation error
+converges at observed orders $3.03$, $3.42$, $3.53$ over the same grid
+sequence, approaching the fourth order of the cubic image interpolant. The
+residual defect is attributable to the $C^0$ kinks of that interpolant, which
+the level-0 quadrature straddles: raising the interpolation stencils from
+fourth to sixth order does not improve the rate, whereas a $C^2$ image
+representation would be expected to.
+
+\subsection{Cost}
+
+The measured cost in Table~\ref{tab:refine} follows \eqref{eq:cost}. Direct
+evaluation grows by a factor of $8$ per grid doubling and the multilevel
+algorithm by a factor between $4$ and $6$, so the advantage grows as
+$\bigO(\sqrt{N}/\log N)$. At $n=129$ the operation count is $2.9\times$ lower
+and the wall time $4.5\times$ lower; the gap between the two ratios is a memory
+effect, the direct schedule having a much larger level-0 working set.
+Table~\ref{tab:model} extrapolates the operation count, which is exact
+arithmetic on the schedule rather than a measurement.
+
+INPUT_MODEL
+
+The crossover is early --- the multilevel algorithm is already cheaper at
+$n=65$ --- because its overhead is a small constant times the level-0 work
+rather than an asymptotic-only saving.
+
+\subsection{Parameters}
+\label{sec:knobs}
+
+Table~\ref{tab:knobs} isolates the accuracy parameters at $n=129$.
+
+INPUT_KNOBS
+
+$n_\theta^{\min}$ behaves as \eqref{eq:constant} predicts, and
+$n_\theta^{\min}=n_\theta$ gives zero error by construction. $\nu=2$ is
+confirmed optimal: $\nu=4$ and $\nu=8$ cost two and four times as much and
+change the error by under $2\%$, as \eqref{eq:tcrit} predicts. The transverse
+oversampling $\sigma$ is the dominant knob, and Figure~\ref{fig:knobs} shows
+it is also the most efficient one: at equal cost it buys more accuracy than any
+of the others.
+
+The stencil widths in the lower block of Table~\ref{tab:knobs} locate the error
+budget, and the answer is not what the design would suggest. Narrowing the
+angular stencil from fourth to second order costs a factor of $1.9$, whereas
+narrowing the transverse and along-ray stencils costs factors of $14$ and
+$6.5$; widening the angular stencil to sixth order gains $2.5\%$ against
+$23\%$ for the transverse one. The dominant term is therefore not the
+interpolation in $\theta$ --- the operation the method is built around --- but
+the resampling of the tables in $(s,t)$ that accompanies it, a consequence of
+storing the tables in ray-aligned coordinates rather than an intrinsic property
+of the multilevel decomposition. A formulation that avoids the resampling, for
+instance by carrying frame-covariant quantities, would improve on what is
+reported here.
+
+Finally, the smoothness assumption is not decorative. Replacing the smooth
+activity by a discontinuous disc raises $e_{\mathrm{alg}}$ by a factor of
+$3.5$ at the settings of Table~\ref{tab:battery} and, more tellingly, the
+error then stops converging under refinement.
+
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{Limitations.}
+Three are worth stating precisely. (i) On rays with very large total
+attenuation the true signal underflows, and what the method controls is a small
+error \emph{absolute} to $\max|S|$, not a small relative error; carrying the
+mean survival weight $W=I/S$ instead of $I$ would address this, at the cost of
+an indeterminate form wherever a segment misses the support. (ii) The order is
+capped near three by the $C^0$ image interpolant rather than by the multilevel
+structure. (iii) Zero extension is exact only for compactly supported fields;
+a Gaussian truncated at the domain boundary at the $10^{-4}$ level produces a
+matching error floor.
+
+\paragraph{Extensions.}
+The three-dimensional case is not a difficulty of principle. Concatenation
+\eqref{eq:merge} is dimension-independent; the direction grid becomes
+two-dimensional on the sphere, so \eqref{eq:angcrit} becomes an area criterion
+and the number of directions at level $l$ grows as $(\ell_l/h)^2$, while the
+number of segment positions falls by the same factor, so the work per level is
+again constant.
+
+The adjoint $\Rmu^{*}$, needed by every method in
+Section~\ref{sec:motivation}, is the transpose of Algorithm~\ref{alg:main}
+step by step: the merge transposes to a scatter and the angular prolongation to
+anterpolation, in the sense of \citep{brandtlubrecht1990}. The transpose has
+the same cost, and implementing it is the immediate next step, as is the
+nonlinear inversion --- the FAS/FMG treatment of \eqref{eq:inverse}, and of the
+joint estimation of $(f,\mu)$ in which $\mu$ enters nonlinearly --- sketched in
+Section~\ref{sec:motivation}.
+
+\section{Conclusion}
+
+The attenuated Radon transform admits an $\bigO(N\log N)$ multilevel
+evaluation. The construction rests on an exact concatenation identity for the
+triple $(S,E,I)$, on interpolating the exponent rather than its exponential and
+the exit-referenced rather than the midpoint-referenced attenuated integral,
+and on a level schedule that refines the angular grid at the finest levels
+where segments are short. On a battery of attenuation fields the error the
+schedule introduces stays an order of magnitude below the discretisation error
+of the grid and converges with it, at a cost already several times below direct
+evaluation at moderate resolution and improving as $\bigO(\sqrt{N}/\log N)$.
+
+\subsection*{Acknowledgements}
+
+The approach follows the multilevel integral-transform framework developed by
+Achi Brandt and collaborators, and an unpublished scheme for this problem
+communicated by Achi Brandt to the first author.
+
+\subsection*{Reproducibility}
+
+Code, tests and the scripts producing every table and figure are at
+\url{https://github.com/orenlivne/tomogrid}. The scaling study is
+\texttt{python -m experiments.scaling}.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

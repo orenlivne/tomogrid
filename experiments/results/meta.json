@@ -1,0 +1,7 @@
+{
+  "n_theta_min": 16,
+  "n_samples": 4097,
+  "reference_drift": 8.268729441675343e-08,
+  "seconds": 646.9982469549999,
+  "phantom": "three_blobs x high_contrast"
+}

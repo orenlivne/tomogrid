@@ -92,3 +92,27 @@ pip install numpy pytest
 python -m pytest tests -q              # fast suite
 python -m pytest tests -q --runslow    # + convergence studies and the full 36-case battery
 ```
+
+## Experiments and paper
+
+```
+python -m experiments.scaling      # refinement + knob study + cost model -> experiments/results/
+python -m experiments.battery      # 36-phantom algorithmic error table
+cd paper && make                   # rebuild tomogrid_built.pdf from those CSVs
+```
+
+`paper/tomogrid.tex` is the source with `INPUT_*` placeholders;
+`paper/make_tables.py` substitutes tables generated from the measured CSVs into
+`paper/tomogrid_built.tex`, so every number in the paper comes from committed
+data. Measured results, at `n_theta = n-1`, `n_s = n`, `n_theta_min = 16`:
+
+| n | e_alg | e_disc | e_tot | ML Gflop | direct Gflop | ML s | direct s |
+|---|---|---|---|---|---|---|---|
+| 33  | 2.05e-3 | 2.45e-2 | 2.42e-2 | 0.07 | 0.09 | 0.5 | 1.3 |
+| 65  | 4.50e-4 | 5.97e-3 | 5.92e-3 | 0.38 | 0.68 | 3.8 | 9.0 |
+| 129 | 1.38e-4 | 7.74e-4 | 7.65e-4 | 1.90 | 5.41 | 15.4 | 69.0 |
+| 257 | —       | —       | 7.67e-5 | 9.20 | 43.12 | 77.8 | — |
+
+`e_alg` is multilevel vs direct evaluation on the same discretisation (what the
+schedule costs), `e_disc` is direct vs the continuum, `e_tot` is multilevel vs
+the continuum.

@@ -1,0 +1,45 @@
+continuum reference self-consistency: 8.27e-08
+
+=== refinement study ===
+[grid 33] n_theta=32 n_s=33
+   multilevel     0.49 s     0.07 Gflop
+   direct         1.29 s     0.09 Gflop
+   e_tot=2.417e-02  e_alg=2.047e-03  e_disc=2.452e-02
+[grid 65] n_theta=64 n_s=65
+   multilevel     3.82 s     0.38 Gflop
+   direct         9.01 s     0.68 Gflop
+   e_tot=5.919e-03  e_alg=4.499e-04  e_disc=5.973e-03
+[grid 129] n_theta=128 n_s=129
+   multilevel    15.42 s     1.90 Gflop
+   direct        69.04 s     5.41 Gflop
+   e_tot=7.655e-04  e_alg=1.383e-04  e_disc=7.743e-04
+[grid 257] n_theta=256 n_s=257
+   multilevel    77.79 s     9.20 Gflop
+   e_tot=7.673e-05  e_alg=nan  e_disc=nan
+wrote /home/user/tomogrid/experiments/results/refinement.csv
+
+=== knob study ===
+   n_theta_min=4: e_alg=2.223e-03 0.69 Gflop  5.6s
+   n_theta_min=8: e_alg=5.762e-04 1.16 Gflop  11.3s
+   n_theta_min=16: e_alg=1.383e-04 1.90 Gflop  19.5s
+   n_theta_min=32: e_alg=9.300e-05 2.98 Gflop  32.4s
+   n_theta_min=64: e_alg=9.409e-05 4.33 Gflop  47.6s
+   s_oversample=1: e_alg=1.599e-03 0.95 Gflop  8.7s
+   s_oversample=2: e_alg=1.383e-04 1.90 Gflop  19.1s
+   s_oversample=4: e_alg=7.249e-05 3.79 Gflop  40.7s
+   t_oversample=2: e_alg=1.383e-04 1.90 Gflop  18.1s
+   t_oversample=4: e_alg=1.376e-04 3.79 Gflop  37.4s
+   t_oversample=8: e_alg=1.356e-04 7.56 Gflop  75.0s
+wrote /home/user/tomogrid/experiments/results/knobs.csv
+
+=== cost model extrapolation ===
+   n=   65  ml       0.38 G   direct         0.68 G   speedup      1.8x
+   n=  129  ml       1.90 G   direct         5.41 G   speedup      2.8x
+   n=  257  ml       9.20 G   direct        43.12 G   speedup      4.7x
+   n=  513  ml      43.20 G   direct       344.27 G   speedup      8.0x
+   n= 1025  ml     198.48 G   direct      2751.46 G   speedup     13.9x
+   n= 2049  ml     896.81 G   direct     22000.97 G   speedup     24.5x
+   n= 4097  ml    3999.14 G   direct    175964.81 G   speedup     44.0x
+wrote /home/user/tomogrid/experiments/results/model.csv
+
+total 647s

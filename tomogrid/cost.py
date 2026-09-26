@@ -31,11 +31,18 @@ def estimate_work(hier: Hierarchy, *, gl_order: int, img_order: int,
         interp_targets += targets
         interp_gathers += targets * q * s_order * t_order
 
+    # Level-0 also applies the m x m tail-integral matrix once per segment,
+    # i.e. gl_order multiply-adds per node.
+    level0_quad = level0_nodes * gl_order
+    gathers = 2 * level0_nodes * img_order**2 + interp_gathers
     return {
         "level0_nodes": level0_nodes,
         "table_points": table_points,
         "interp_targets": interp_targets,
         "interp_gathers": interp_gathers,
         # 2 fields (f and mu) sampled with an img_order^2 stencil at level 0.
-        "gathers": 2 * level0_nodes * img_order**2 + interp_gathers,
+        "gathers": gathers,
+        "level0_quad": level0_quad,
+        # Each gather is one multiply and one add.
+        "flops": 2 * (gathers + level0_quad),
     }

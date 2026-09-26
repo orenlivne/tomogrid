@@ -4,3 +4,10 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out
+experiments/results/*.log
+!experiments/results/full_run.log
