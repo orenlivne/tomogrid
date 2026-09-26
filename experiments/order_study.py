@@ -102,8 +102,6 @@ def main():
         print(f"\nfitted  W ~ (log 1/eps)^{slope:.2f}")
 
 
-if __name__ == "__main__":
-    main()
 
 
 def sampling_sweep(n_grid, pairs, order=4):
@@ -135,3 +133,6 @@ def sampling_sweep(n_grid, pairs, order=4):
         print(f"   n_theta_min={n_min:3d} sigma={sigma}: e_alg={e:.3e}  "
               f"{w['flops']/1e9:7.2f} Gflop  {secs:.0f}s", flush=True)
     return rows
+
+if __name__ == "__main__":
+    main()
