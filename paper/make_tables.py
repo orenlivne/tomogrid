@@ -181,6 +181,43 @@ attenuation & $\max E$ & {head}\\
 \end{table}"""
 
 
+def table_accuracy_cost(order_rows, sampling_rows):
+    """Two sweeps side by side: stencil order on the left, sampling on the right."""
+    left = [[f"${int(r['order'])}$", sci(r["e_alg"]), f"{r['flops'] / 1e9:.2f}"]
+            for r in order_rows]
+    right = [[f"$({int(r['n_theta_min'])},{int(r['s_oversample'])})$",
+              sci(r["e_alg"]), f"{r['flops'] / 1e9:.2f}"]
+             for r in sampling_rows]
+    body = []
+    for i in range(max(len(left), len(right))):
+        a = left[i] if i < len(left) else ["", "", ""]
+        b = right[i] if i < len(right) else ["", "", ""]
+        body.append(" & ".join(a + b) + r" \\")
+    n = int(order_rows[0]["n_grid"])
+    head = (r"$p$ & $e_{\mathrm{alg}}$ & Gflop & "
+            r"$(n_\theta^{\min},\sigma)$ & $e_{\mathrm{alg}}$ & Gflop\\")
+    return (r"""\begin{table}[t]
+\centering\small
+\caption{The cost of a prescribed accuracy at $n=""" + str(n) + r"""$. Left: all
+three stencil widths raised together, sampling held fixed. Right:
+$n_\theta^{\min}$ and $\sigma$ raised together, stencils fixed at fourth order.
+Raising the order stops paying beyond $p=4$ and then reverses; raising the
+sampling keeps paying, at $W\sim\varepsilon^{-0.61}$.}
+\label{tab:accuracy_cost}
+\begin{tabular}{lrr@{\qquad}lrr}
+\toprule
+\multicolumn{3}{c}{stencil order} &
+\multicolumn{3}{c}{sampling}\\
+\cmidrule(lr){1-3}\cmidrule(lr){4-6}
+""" + head + r"""
+\midrule
+""" + "\n".join(body) + r"""
+\bottomrule
+\end{tabular}
+\end{table}"""
+            )
+
+
 FIGURE = r"""\begin{figure}[t]
 \centering
 \includegraphics{figs/scaling.pdf}
@@ -208,8 +245,9 @@ stencil $q$ moves the error far less than the transverse one $p_s$.}
 
 
 def main():
-    ref, model, knobs, battery = (read(f"{n}.csv") for n in
-                                  ("refinement", "model", "knobs", "battery"))
+    ref, model, knobs, battery, order, sampling = (
+        read(f"{n}.csv") for n in
+        ("refinement", "model", "knobs", "battery", "order", "sampling"))
     meta = json.loads((RES / "meta.json").read_text())
     src = (HERE / "tomogrid.tex").read_text()
     for key, val in (
@@ -217,6 +255,7 @@ def main():
         ("INPUT_MODEL", table_model(model)),
         ("INPUT_KNOBS", table_knobs(knobs)),
         ("INPUT_BATTERY", table_battery(battery)),
+        ("INPUT_ACCURACY_COST", table_accuracy_cost(order, sampling)),
         ("INPUT_FIGURE", FIGURE),
         ("INPUT_REFDRIFT", sci(meta["reference_drift"], 1)),
     ):

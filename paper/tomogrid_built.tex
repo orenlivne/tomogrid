@@ -54,10 +54,11 @@ attenuation exponent rather than its exponential, and a segment integral
 referenced to its own exit point rather than to its midpoint --- and show that
 the alternatives are unstable. Numerical experiments on a battery of
 attenuation and activity phantoms confirm the predicted cost and show that the
-error introduced by the multilevel schedule is an order of magnitude below the
-discretisation error of the underlying grid by a factor of six to twelve, at a
-cost already $2.9\times$ lower in operations and $4.5\times$ lower in wall time
-at $n=129$, with the ratio falling as $\bigO(\log N/\sqrt{N})$.
+error the multilevel schedule introduces converges under refinement and stays
+one to two orders of magnitude below the discretisation error of the grid over
+the range tested, at a cost already $2.9\times$ lower in operations and
+$4.5\times$ lower in wall time at $n=129$, with the ratio falling as
+$\bigO(\log N/\sqrt{N})$.
 \end{abstract}
 
 \section{Introduction}
@@ -554,8 +555,9 @@ $n_\theta=n-1$, $n_s=n$ and $n_\theta^{\min}=16$ held fixed.
 \texttt{high\_contrast} (peak chord attenuation $E\approx3.1$), with
 $n_\theta=n-1$, $n_s=n$, $n_\theta^{\min}=16$, $\sigma=\nu=2$. Errors are
 relative sup errors; $p$ is the observed order between consecutive rows.
-Direct evaluation at $n=257$ was not run; its operation count is from the
-schedule. Times are single-threaded NumPy on one core and are indicative only.}
+Direct evaluation at $n=513$ was not run --- its level-0 table alone would be
+$12.9$\,GB against $0.4$\,GB for the multilevel schedule --- and its operation
+count there comes from the schedule. Times are single-threaded NumPy on one core and are indicative only.}
 \label{tab:refine}
 \begin{tabular}{rr rr rr rr rr rr}
 \toprule
@@ -568,10 +570,11 @@ schedule. Times are single-threaded NumPy on one core and are indicative only.}
 $n$ & $n_\theta$ & err & $p$ & err & $p$ & err & $p$
     & ML & direct & ML & direct\\
 \midrule
-$33$ & $32$ & $2.05\!\times\!10^{-3}$ & --- & $2.45\!\times\!10^{-2}$ & --- & $2.42\!\times\!10^{-2}$ & --- & 0.07 & 0.09 & 0.5 & 1.3 \\
-$65$ & $64$ & $4.50\!\times\!10^{-4}$ & 2.19 & $5.97\!\times\!10^{-3}$ & 2.04 & $5.92\!\times\!10^{-3}$ & 2.03 & 0.38 & 0.68 & 3.8 & 9.0 \\
-$129$ & $128$ & $1.38\!\times\!10^{-4}$ & 1.70 & $7.74\!\times\!10^{-4}$ & 2.95 & $7.65\!\times\!10^{-4}$ & 2.95 & 1.90 & 5.41 & 15.4 & 69.0 \\
-$257$ & $256$ & --- & --- & --- & --- & $7.67\!\times\!10^{-5}$ & 3.32 & 9.20 & 43.12 & 77.8 & --- \\
+$33$ & $32$ & $2.05\!\times\!10^{-3}$ & --- & $2.45\!\times\!10^{-2}$ & --- & $2.42\!\times\!10^{-2}$ & --- & 0.07 & 0.09 & 0.6 & 1.3 \\
+$65$ & $64$ & $4.50\!\times\!10^{-4}$ & 2.19 & $5.97\!\times\!10^{-3}$ & 2.04 & $5.92\!\times\!10^{-3}$ & 2.03 & 0.38 & 0.68 & 4.0 & 12.1 \\
+$129$ & $128$ & $1.38\!\times\!10^{-4}$ & 1.70 & $7.74\!\times\!10^{-4}$ & 2.95 & $7.65\!\times\!10^{-4}$ & 2.95 & 1.90 & 5.41 & 16.9 & 78.8 \\
+$257$ & $256$ & $3.94\!\times\!10^{-5}$ & 1.81 & $7.99\!\times\!10^{-5}$ & 3.28 & $7.67\!\times\!10^{-5}$ & 3.32 & 9.20 & 43.12 & 92.9 & 551.5 \\
+$513$ & $512$ & --- & --- & --- & --- & $1.24\!\times\!10^{-5}$ & 2.63 & 43.20 & 344.27 & 560.7 & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -601,15 +604,27 @@ stencil $q$ moves the error far less than the transverse one $p_s$.}
 \label{fig:knobs}
 \end{figure}
 
-Two observations. First, $e_{\mathrm{alg}}$ is a factor of six to twelve below
-$e_{\mathrm{disc}}$ at every resolution, so the multilevel schedule is
-not what limits the accuracy of the computed sinogram; the discretisation of
-the image is. Second, both errors converge under refinement, which is the
-property that makes the method usable: the multilevel error is not a fixed
-tolerance but goes to zero with the mesh.
+Both errors converge under refinement, which is the property that makes the
+method usable at all: the multilevel error is not a fixed tolerance but goes to
+zero with the mesh. They do not converge at the same rate, however. The
+observed order of $e_{\mathrm{disc}}$ rises through $2.04$, $2.95$, $3.28$
+towards the fourth order of the cubic image interpolant, whereas
+$e_{\mathrm{alg}}$ holds at about $1.8$. At \emph{fixed} parameters the ratio
+$e_{\mathrm{disc}}/e_{\mathrm{alg}}$ therefore falls --- $12.0$, $13.3$, $5.6$,
+$2.0$ across the four grids --- and the schedule, negligible on coarse grids,
+becomes the dominant error somewhere beyond $n=257$.
 
-The observed orders are pre-asymptotic on this phantom, which contains a blob
-of radius $0.22$ that is under-resolved at $n=33$. On a well-resolved smooth
+This is a statement about holding $n_\theta^{\min}$ and $\sigma$ fixed while
+refining, which is not how the method should be used. Those parameters set a
+prescribed tolerance, and Section~\ref{sec:order} shows what it costs to buy
+one: the natural formulation is a target accuracy $\varepsilon$ chosen
+independently of $h$, with the stencil widths set from it. What
+Table~\ref{tab:refine} establishes is that the defaults used throughout this
+paper are calibrated for grids up to a few hundred points per side, and that
+the calibration must be revisited beyond that.
+
+The orders quoted are pre-asymptotic on this phantom, which contains a blob of
+radius $0.22$ that is under-resolved at $n=33$. On a well-resolved smooth
 phantom (a single $C^\infty$ bump of radius $0.7$) the discretisation error
 converges at observed orders $3.03$, $3.42$, $3.53$ over the same grid
 sequence, approaching the fourth order of the cubic image interpolant. The
@@ -727,6 +742,62 @@ activity by a discontinuous disc raises $e_{\mathrm{alg}}$ by a factor of
 $3.5$ at the settings of Table~\ref{tab:battery} and, more tellingly, the
 error then stops converging under refinement.
 
+\subsection{The cost of a prescribed accuracy}
+\label{sec:order}
+
+Table~\ref{tab:refine} holds the parameters fixed and refines the grid. The
+complementary question, and the one a user actually asks, is what it costs to
+meet a tolerance $\varepsilon$ at a given resolution.
+Table~\ref{tab:accuracy_cost} answers it two ways at $n=129$.
+
+Raising the interpolation order is the route that would give the classical
+multilevel answer, in which the order needed for accuracy $\varepsilon$ is
+$p\sim\log(1/\varepsilon)$ and the work is proportional to it. It does not work
+here. The error falls from second to fourth order and then \emph{rises} again.
+On equispaced nodes the Lebesgue constant of Lagrange interpolation grows like
+$2^p$, so once the table spacing is not comfortably inside the field's Nyquist
+rate --- and $\delta s=h/\sigma$ with $\sigma=4$ is not, since the relevant
+factor is $\pi/\sigma\approx0.8$ --- the conditioning defeats the order.
+
+Raising the sampling does keep paying. Over a $330\times$ range in error the
+measurements fit
+\begin{equation}
+  W \sim \varepsilon^{-0.61},
+  \label{eq:epscost}
+\end{equation}
+a power law, not a logarithm. We therefore do not claim
+$\bigO(N\log N\log(1/\varepsilon))$ for this implementation. Two things separate
+it from the classical statement, and both are properties of the implementation
+rather than of the method: the transfers here are scattered $d$-dimensional
+resamples costing $p^d$ per point, where the grid-to-grid transfers of
+\citep{brandtlubrecht1990} cost $dp$; and the stencils are too ill-conditioned
+to raise $p$ far enough for the logarithm to emerge. Better-conditioned
+transfers and a factored rotation would address both, and are the natural route
+to restoring \eqref{eq:epscost} to logarithmic form.
+
+\begin{table}[t]
+\centering\small
+\caption{The cost of a prescribed accuracy at $n=129$. Left: all
+three stencil widths raised together, sampling held fixed. Right:
+$n_\theta^{\min}$ and $\sigma$ raised together, stencils fixed at fourth order.
+Raising the order stops paying beyond $p=4$ and then reverses; raising the
+sampling keeps paying, at $W\sim\varepsilon^{-0.61}$.}
+\label{tab:accuracy_cost}
+\begin{tabular}{lrr@{\qquad}lrr}
+\toprule
+\multicolumn{3}{c}{stencil order} &
+\multicolumn{3}{c}{sampling}\\
+\cmidrule(lr){1-3}\cmidrule(lr){4-6}
+$p$ & $e_{\mathrm{alg}}$ & Gflop & $(n_\theta^{\min},\sigma)$ & $e_{\mathrm{alg}}$ & Gflop\\
+\midrule
+$2$ & $4.05\!\times\!10^{-4}$ & 3.11 & $(4,1)$ & $3.51\!\times\!10^{-3}$ & 0.34 \\
+$4$ & $2.09\!\times\!10^{-5}$ & 5.95 & $(8,2)$ & $5.76\!\times\!10^{-4}$ & 1.16 \\
+$6$ & $3.57\!\times\!10^{-5}$ & 13.66 & $(16,4)$ & $7.25\!\times\!10^{-5}$ & 3.79 \\
+$8$ & $4.17\!\times\!10^{-5}$ & 28.67 & $(32,8)$ & $1.07\!\times\!10^{-5}$ & 11.88 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \section{Discussion}
 \label{sec:discussion}
 
@@ -741,13 +812,40 @@ structure. (iii) Zero extension is exact only for compactly supported fields;
 a Gaussian truncated at the domain boundary at the $10^{-4}$ level produces a
 matching error floor.
 
-\paragraph{Extensions.}
-The three-dimensional case is not a difficulty of principle. Concatenation
-\eqref{eq:merge} is dimension-independent; the direction grid becomes
-two-dimensional on the sphere, so \eqref{eq:angcrit} becomes an area criterion
-and the number of directions at level $l$ grows as $(\ell_l/h)^2$, while the
-number of segment positions falls by the same factor, so the work per level is
-again constant.
+\paragraph{Three dimensions.}
+Concatenation \eqref{eq:merge} is dimension-independent and the construction
+carries over: the direction grid becomes two-dimensional on the sphere, so
+\eqref{eq:angcrit} becomes an area criterion, the number of directions at level
+$l$ grows as $(\ell_l/h)^2$ while the number of segment centres falls as
+$h/\ell_l$, and the work per level grows by two rather than staying flat, so the
+total is dominated by the top level, i.e.\ by the size of the output.
+
+The implementation is correct --- $\mu\equiv0$ gives $I=S$ to $10^{-16}$ and
+the discretisation converges at observed orders $3.31$ and $3.84$ --- but at
+reachable sizes it is \emph{slower} than direct evaluation, and the reason is
+worth stating because it is not a small-grid artefact. There are two ways to
+obtain one table entry: build it from the image, at $2\,g\,p_{\mathrm{img}}^d$
+gathers, or prolongate it from neighbouring directions, at
+$3\,q^{d-1}p_s^{d-1}p_t$. The ratio of the second to the first is $0.75$ in two
+dimensions and $4.00$ in three. Since the method's only saving is that level $0$
+is built at $n^{\min}$ directions rather than all of them, it can win only when
+prolongating is cheaper than building --- which in three dimensions it is not.
+Both terms scale with the same table size, so refining the grid does not move
+the ratio; it improves only as the angular resolution tracks the spatial one,
+reaching unity near $n\approx200$ against $n=65$ in two dimensions.
+
+The constant responsible is the resampling forced by storing tables in a ray
+frame that rotates with the direction. Factoring the rotation into shears
+reduces it from $3072$ to about $864$ and moves the three-dimensional crossover
+to $n\approx60$. Removing it altogether requires indexing lines by slope and
+intercept against a fixed block structure, as in the dyadic recursions of
+\citep{gotz1996,brady1998,brandtdym1999}, where a line through a block of height
+$2H$ meets its two half-blocks at intercepts $b$ and $b+sH$; choosing the slope
+set so that $sH$ is an integral number of columns makes the merge a pure indexed
+addition. Since \eqref{eq:merge} acts elementwise in the line index, it
+transfers to that indexing unchanged, the exponential remaining the only
+multiplication. The cost is that the output then lands on a slope-equispaced
+rather than angle-equispaced direction set.
 
 The adjoint $\Rmu^{*}$, needed by every method in
 Section~\ref{sec:motivation}, is the transpose of Algorithm~\ref{alg:main}

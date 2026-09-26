@@ -610,6 +610,41 @@ activity by a discontinuous disc raises $e_{\mathrm{alg}}$ by a factor of
 $3.5$ at the settings of Table~\ref{tab:battery} and, more tellingly, the
 error then stops converging under refinement.
 
+\subsection{The cost of a prescribed accuracy}
+\label{sec:order}
+
+Table~\ref{tab:refine} holds the parameters fixed and refines the grid. The
+complementary question, and the one a user actually asks, is what it costs to
+meet a tolerance $\varepsilon$ at a given resolution.
+Table~\ref{tab:accuracy_cost} answers it two ways at $n=129$.
+
+Raising the interpolation order is the route that would give the classical
+multilevel answer, in which the order needed for accuracy $\varepsilon$ is
+$p\sim\log(1/\varepsilon)$ and the work is proportional to it. It does not work
+here. The error falls from second to fourth order and then \emph{rises} again.
+On equispaced nodes the Lebesgue constant of Lagrange interpolation grows like
+$2^p$, so once the table spacing is not comfortably inside the field's Nyquist
+rate --- and $\delta s=h/\sigma$ with $\sigma=4$ is not, since the relevant
+factor is $\pi/\sigma\approx0.8$ --- the conditioning defeats the order.
+
+Raising the sampling does keep paying. Over a $330\times$ range in error the
+measurements fit
+\begin{equation}
+  W \sim \varepsilon^{-0.61},
+  \label{eq:epscost}
+\end{equation}
+a power law, not a logarithm. We therefore do not claim
+$\bigO(N\log N\log(1/\varepsilon))$ for this implementation. Two things separate
+it from the classical statement, and both are properties of the implementation
+rather than of the method: the transfers here are scattered $d$-dimensional
+resamples costing $p^d$ per point, where the grid-to-grid transfers of
+\citep{brandtlubrecht1990} cost $dp$; and the stencils are too ill-conditioned
+to raise $p$ far enough for the logarithm to emerge. Better-conditioned
+transfers and a factored rotation would address both, and are the natural route
+to restoring \eqref{eq:epscost} to logarithmic form.
+
+INPUT_ACCURACY_COST
+
 \section{Discussion}
 \label{sec:discussion}
 
@@ -624,13 +659,40 @@ structure. (iii) Zero extension is exact only for compactly supported fields;
 a Gaussian truncated at the domain boundary at the $10^{-4}$ level produces a
 matching error floor.
 
-\paragraph{Extensions.}
-The three-dimensional case is not a difficulty of principle. Concatenation
-\eqref{eq:merge} is dimension-independent; the direction grid becomes
-two-dimensional on the sphere, so \eqref{eq:angcrit} becomes an area criterion
-and the number of directions at level $l$ grows as $(\ell_l/h)^2$, while the
-number of segment positions falls by the same factor, so the work per level is
-again constant.
+\paragraph{Three dimensions.}
+Concatenation \eqref{eq:merge} is dimension-independent and the construction
+carries over: the direction grid becomes two-dimensional on the sphere, so
+\eqref{eq:angcrit} becomes an area criterion, the number of directions at level
+$l$ grows as $(\ell_l/h)^2$ while the number of segment centres falls as
+$h/\ell_l$, and the work per level grows by two rather than staying flat, so the
+total is dominated by the top level, i.e.\ by the size of the output.
+
+The implementation is correct --- $\mu\equiv0$ gives $I=S$ to $10^{-16}$ and
+the discretisation converges at observed orders $3.31$ and $3.84$ --- but at
+reachable sizes it is \emph{slower} than direct evaluation, and the reason is
+worth stating because it is not a small-grid artefact. There are two ways to
+obtain one table entry: build it from the image, at $2\,g\,p_{\mathrm{img}}^d$
+gathers, or prolongate it from neighbouring directions, at
+$3\,q^{d-1}p_s^{d-1}p_t$. The ratio of the second to the first is $0.75$ in two
+dimensions and $4.00$ in three. Since the method's only saving is that level $0$
+is built at $n^{\min}$ directions rather than all of them, it can win only when
+prolongating is cheaper than building --- which in three dimensions it is not.
+Both terms scale with the same table size, so refining the grid does not move
+the ratio; it improves only as the angular resolution tracks the spatial one,
+reaching unity near $n\approx200$ against $n=65$ in two dimensions.
+
+The constant responsible is the resampling forced by storing tables in a ray
+frame that rotates with the direction. Factoring the rotation into shears
+reduces it from $3072$ to about $864$ and moves the three-dimensional crossover
+to $n\approx60$. Removing it altogether requires indexing lines by slope and
+intercept against a fixed block structure, as in the dyadic recursions of
+\citep{gotz1996,brady1998,brandtdym1999}, where a line through a block of height
+$2H$ meets its two half-blocks at intercepts $b$ and $b+sH$; choosing the slope
+set so that $sH$ is an integral number of columns makes the merge a pure indexed
+addition. Since \eqref{eq:merge} acts elementwise in the line index, it
+transfers to that indexing unchanged, the exponential remaining the only
+multiplication. The cost is that the output then lands on a slope-equispaced
+rather than angle-equispaced direction set.
 
 The adjoint $\Rmu^{*}$, needed by every method in
 Section~\ref{sec:motivation}, is the transpose of Algorithm~\ref{alg:main}
