@@ -196,3 +196,80 @@ def battery() -> list[Case]:
                 )
             )
     return cases
+
+
+# --- three-dimensional fields ---------------------------------------------
+
+
+def _radius3(x, y, z, center, radius):
+    cx, cy, cz = center
+    dx = (np.asarray(x) - cx) / radius
+    dy = (np.asarray(y) - cy) / radius
+    dz = (np.asarray(z) - cz) / radius
+    return np.sqrt(dx * dx + dy * dy + dz * dz)
+
+
+def bump3d(amp=1.0, center=(0.0, 0.0, 0.0), radius=0.3):
+    """``C^infinity`` blob in 3-D, identically zero outside ``radius``."""
+
+    def fun(x, y, z):
+        r = _radius3(x, y, z, center, radius)
+        inside = r < 1.0
+        rs = np.where(inside, r, 0.0)
+        return np.where(inside,
+                        amp * np.exp(1.0 - 1.0 / np.maximum(1.0 - rs**2, 1e-300)),
+                        0.0)
+
+    return fun
+
+
+def plateau3d(amp=1.0, center=(0.0, 0.0, 0.0), r_flat=0.35, r_zero=0.6):
+    """Smoothly-edged uniform ball."""
+
+    def fun(x, y, z):
+        r = _radius3(x, y, z, center, 1.0)
+        return amp * _psi((r_zero - r) / (r_zero - r_flat))
+
+    return fun
+
+
+def zero3d():
+    def fun(x, y, z):
+        return np.zeros(np.broadcast(np.asarray(x), np.asarray(y),
+                                     np.asarray(z)).shape)
+
+    return fun
+
+
+def total3d(*funs):
+    def fun(x, y, z):
+        out = 0.0
+        for f in funs:
+            out = out + f(x, y, z)
+        return out
+
+    return fun
+
+
+ACTIVITIES_3D = {
+    "centered_bump": (bump3d(amp=1.0, radius=0.5), 0.55),
+    "three_blobs": (
+        total3d(bump3d(amp=1.0, center=(-0.22, 0.18, 0.05), radius=0.22),
+                bump3d(amp=0.6, center=(0.25, 0.08, -0.2), radius=0.18),
+                bump3d(amp=1.4, center=(0.05, -0.25, 0.2), radius=0.2)),
+        0.55,
+    ),
+}
+
+ATTENUATIONS_3D = {
+    "zero": (zero3d(), 0.0, "no attenuation: I must equal S exactly"),
+    "uniform_soft": (plateau3d(amp=1.0, r_flat=0.4, r_zero=0.62), 0.62, "water-like ball"),
+    "high_contrast": (
+        total3d(plateau3d(amp=1.0, r_flat=0.35, r_zero=0.6),
+                bump3d(amp=8.0, center=(0.15, 0.1, -0.05), radius=0.22)),
+        0.6,
+        "peak chord attenuation ~ 4",
+    ),
+    "very_strong": (plateau3d(amp=12.0, r_flat=0.4, r_zero=0.62), 0.62,
+                    "chord attenuation ~ 10"),
+}

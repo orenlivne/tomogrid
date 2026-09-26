@@ -15,3 +15,21 @@ continuum reference self-consistency: 8.27e-08
    e_tot=7.655e-04  e_alg=1.383e-04  e_disc=7.743e-04
 [grid 257] n_theta=256 n_s=257
    multilevel    92.90 s     9.20 Gflop
+   direct       551.48 s    43.12 Gflop
+   e_tot=7.673e-05  e_alg=3.942e-05  e_disc=7.990e-05
+[grid 513] n_theta=512 n_s=513
+   multilevel   560.69 s    43.20 Gflop
+   e_tot=1.239e-05  e_alg=nan  e_disc=nan
+wrote /home/user/tomogrid/experiments/results/refinement.csv
+
+=== cost model extrapolation ===
+   n=   65  ml       0.38 G   direct         0.68 G   speedup      1.8x
+   n=  129  ml       1.90 G   direct         5.41 G   speedup      2.8x
+   n=  257  ml       9.20 G   direct        43.12 G   speedup      4.7x
+   n=  513  ml      43.20 G   direct       344.27 G   speedup      8.0x
+   n= 1025  ml     198.48 G   direct      2751.46 G   speedup     13.9x
+   n= 2049  ml     896.81 G   direct     22000.97 G   speedup     24.5x
+   n= 4097  ml    3999.14 G   direct    175964.81 G   speedup     44.0x
+wrote /home/user/tomogrid/experiments/results/model.csv
+
+total 1630s

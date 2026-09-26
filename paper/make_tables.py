@@ -63,8 +63,9 @@ def table_refine(rows):
 \texttt{high\_contrast} (peak chord attenuation $E\approx3.1$), with
 $n_\theta=n-1$, $n_s=n$, $n_\theta^{\min}=16$, $\sigma=\nu=2$. Errors are
 relative sup errors; $p$ is the observed order between consecutive rows.
-Direct evaluation at $n=257$ was not run; its operation count is from the
-schedule. Times are single-threaded NumPy on one core and are indicative only.}
+Direct evaluation at $n=513$ was not run --- its level-0 table alone would be
+$12.9$\,GB against $0.4$\,GB for the multilevel schedule --- and its operation
+count there comes from the schedule. Times are single-threaded NumPy on one core and are indicative only.}
 \label{tab:refine}
 \begin{tabular}{rr rr rr rr rr rr}
 \toprule

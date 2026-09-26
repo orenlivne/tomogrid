@@ -54,10 +54,11 @@ attenuation exponent rather than its exponential, and a segment integral
 referenced to its own exit point rather than to its midpoint --- and show that
 the alternatives are unstable. Numerical experiments on a battery of
 attenuation and activity phantoms confirm the predicted cost and show that the
-error introduced by the multilevel schedule is an order of magnitude below the
-discretisation error of the underlying grid by a factor of six to twelve, at a
-cost already $2.9\times$ lower in operations and $4.5\times$ lower in wall time
-at $n=129$, with the ratio falling as $\bigO(\log N/\sqrt{N})$.
+error the multilevel schedule introduces converges under refinement and stays
+one to two orders of magnitude below the discretisation error of the grid over
+the range tested, at a cost already $2.9\times$ lower in operations and
+$4.5\times$ lower in wall time at $n=129$, with the ratio falling as
+$\bigO(\log N/\sqrt{N})$.
 \end{abstract}
 
 \section{Introduction}
@@ -530,15 +531,27 @@ INPUT_REFINE
 
 INPUT_FIGURE
 
-Two observations. First, $e_{\mathrm{alg}}$ is a factor of six to twelve below
-$e_{\mathrm{disc}}$ at every resolution, so the multilevel schedule is
-not what limits the accuracy of the computed sinogram; the discretisation of
-the image is. Second, both errors converge under refinement, which is the
-property that makes the method usable: the multilevel error is not a fixed
-tolerance but goes to zero with the mesh.
+Both errors converge under refinement, which is the property that makes the
+method usable at all: the multilevel error is not a fixed tolerance but goes to
+zero with the mesh. They do not converge at the same rate, however. The
+observed order of $e_{\mathrm{disc}}$ rises through $2.04$, $2.95$, $3.28$
+towards the fourth order of the cubic image interpolant, whereas
+$e_{\mathrm{alg}}$ holds at about $1.8$. At \emph{fixed} parameters the ratio
+$e_{\mathrm{disc}}/e_{\mathrm{alg}}$ therefore falls --- $12.0$, $13.3$, $5.6$,
+$2.0$ across the four grids --- and the schedule, negligible on coarse grids,
+becomes the dominant error somewhere beyond $n=257$.
 
-The observed orders are pre-asymptotic on this phantom, which contains a blob
-of radius $0.22$ that is under-resolved at $n=33$. On a well-resolved smooth
+This is a statement about holding $n_\theta^{\min}$ and $\sigma$ fixed while
+refining, which is not how the method should be used. Those parameters set a
+prescribed tolerance, and Section~\ref{sec:order} shows what it costs to buy
+one: the natural formulation is a target accuracy $\varepsilon$ chosen
+independently of $h$, with the stencil widths set from it. What
+Table~\ref{tab:refine} establishes is that the defaults used throughout this
+paper are calibrated for grids up to a few hundred points per side, and that
+the calibration must be revisited beyond that.
+
+The orders quoted are pre-asymptotic on this phantom, which contains a blob of
+radius $0.22$ that is under-resolved at $n=33$. On a well-resolved smooth
 phantom (a single $C^\infty$ bump of radius $0.7$) the discretisation error
 converges at observed orders $3.03$, $3.42$, $3.53$ over the same grid
 sequence, approaching the fourth order of the cubic image interpolant. The

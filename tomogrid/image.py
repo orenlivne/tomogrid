@@ -53,3 +53,45 @@ def square_grid(n: int, half_width: float = 1.0) -> tuple[Axis, Axis]:
     """``n x n`` node grid on ``[-half_width, half_width]^2``."""
     ax = Axis.from_endpoints(-half_width, half_width, n)
     return ax, ax
+
+
+@dataclass(frozen=True)
+class Image3D:
+    """``values[i, j, k]`` at ``(x_axis[i], y_axis[j], z_axis[k])``."""
+
+    values: np.ndarray
+    x_axis: Axis
+    y_axis: Axis
+    z_axis: Axis
+
+    def __post_init__(self) -> None:
+        want = (self.x_axis.n, self.y_axis.n, self.z_axis.n)
+        if self.values.shape != want:
+            raise ValueError(f"values shape {self.values.shape} != {want}")
+
+    @property
+    def h(self) -> float:
+        hs = [self.x_axis.h, self.y_axis.h, self.z_axis.h]
+        if not np.allclose(hs, hs[0]):
+            raise ValueError("anisotropic image grids are not supported")
+        return hs[0]
+
+    def sample(self, x, y, z, order: int = 4) -> np.ndarray:
+        from .interp import interp3d
+
+        return interp3d(self.values, self.x_axis, self.y_axis, self.z_axis,
+                        x, y, z, order)
+
+
+def sample_function3d(fun, x_axis: Axis, y_axis: Axis, z_axis: Axis) -> Image3D:
+    xx = x_axis.nodes[:, None, None]
+    yy = y_axis.nodes[None, :, None]
+    zz = z_axis.nodes[None, None, :]
+    shape = (x_axis.n, y_axis.n, z_axis.n)
+    vals = np.asarray(fun(xx, yy, zz), dtype=float) + np.zeros(shape)
+    return Image3D(values=vals, x_axis=x_axis, y_axis=y_axis, z_axis=z_axis)
+
+
+def cube_grid(n: int, half_width: float = 1.0) -> tuple[Axis, Axis, Axis]:
+    ax = Axis.from_endpoints(-half_width, half_width, n)
+    return ax, ax, ax
