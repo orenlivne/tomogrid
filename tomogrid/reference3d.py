@@ -50,3 +50,38 @@ def image_evaluator3d(img, order: int = 4):
         return img.sample(x, y, z, order=order)
 
     return ev
+
+
+def naive_segments3d(f_eval, mu_eval, p0, p1, n_samples: int = 1025,
+                     chunk: int = 2048):
+    """``(S, E, I)`` over arbitrary 3-D segments ``p0 -> p1`` by dense trapezoid.
+
+    Arc-length integrals with the attenuation referenced to ``p1``; shares no
+    code with the solver.
+    """
+    p0 = np.asarray(p0, dtype=float).reshape(-1, 3)
+    p1 = np.asarray(p1, dtype=float).reshape(-1, 3)
+    arc = np.linalg.norm(p1 - p0, axis=-1)
+    u = np.linspace(0.0, 1.0, n_samples)
+    du = u[1] - u[0]
+    S = np.empty(p0.shape[0])
+    E = np.empty_like(S)
+    I = np.empty_like(S)
+    for lo in range(0, p0.shape[0], chunk):
+        sl = slice(lo, lo + chunk)
+        a, b = p0[sl], p1[sl]
+        pts = [a[:, c, None] + (b[:, c] - a[:, c])[:, None] * u[None, :]
+               for c in range(3)]
+        fv = np.asarray(f_eval(*pts), dtype=float) + np.zeros(pts[0].shape)
+        mv = np.asarray(mu_eval(*pts), dtype=float) + np.zeros(pts[0].shape)
+        ds = arc[sl][:, None] * du
+        panel = 0.5 * (mv[:, :-1] + mv[:, 1:]) * ds
+        tail = np.cumsum(panel[:, ::-1], axis=1)[:, ::-1]
+        A = np.concatenate([tail, np.zeros((tail.shape[0], 1))], axis=1)
+
+        def trapz(g):
+            return (arc[sl] * du) * (g[:, 1:-1].sum(axis=1)
+                                     + 0.5 * (g[:, 0] + g[:, -1]))
+
+        S[sl], E[sl], I[sl] = trapz(fv), A[:, 0], trapz(fv * np.exp(-A))
+    return S, E, I

@@ -249,3 +249,104 @@ def refine(tri: Triple, grid: BDGrid, k: int, *, order: int = 4) -> Triple:
     out[1][:, :, 1::2] = 0.5 * (Aq[1] + Bq[1])
     out[2][:, :, 1::2] = 0.5 * (np.exp(-depth) * Aq[2] + Bq[2])
     return Triple(S=out[0], E=out[1], I=out[2])
+
+
+# --- driver ----------------------------------------------------------------
+
+# The shallow family sweeps along x and covers directions within 45 degrees of
+# +x.  Reflecting and transposing the image gives the other three quadrants.
+# All four are needed: the attenuated transform is *directed*, since the
+# exponent is referenced to the exit end, so theta and theta+pi differ.
+SWEEPS = (
+    ("+x", False, False),
+    ("-x", True, False),
+    ("+y", False, True),
+    ("-y", True, True),
+)
+
+
+@dataclass
+class BDSweep:
+    """Top-level result of one sweep."""
+
+    name: str
+    triple: Triple  # normalised (mean) quantities, shape (n_y, n_slope)
+    p0: np.ndarray  # (n_y, n_slope, 2) segment starts, in image coordinates
+    p1: np.ndarray  # (n_y, n_slope, 2) segment ends
+    arc: np.ndarray  # (n_slope,) arc lengths
+
+    def integrals(self) -> Triple:
+        """Un-normalised (S, E, I): mean times arc length."""
+        a = self.arc[None, :]
+        return Triple(S=self.triple.S * a, E=self.triple.E * a,
+                      I=self.triple.I * a)
+
+    @property
+    def pet(self) -> np.ndarray:
+        t = self.integrals()
+        return np.exp(-t.E) * t.S
+
+
+def _oriented(img: Image, flip: bool, transpose: bool) -> Image:
+    v = img.values
+    ax, ay = img.x_axis, img.y_axis
+    if transpose:
+        v = v.T
+        ax, ay = ay, ax
+    if flip:
+        v = v[::-1]
+        ax = Axis(origin=-(ax.origin + ax.h * (ax.n - 1)), h=ax.h, n=ax.n)
+    return Image(values=np.ascontiguousarray(v), x_axis=ax, y_axis=ay)
+
+
+def _to_image_frame(p: np.ndarray, flip: bool, transpose: bool) -> np.ndarray:
+    """Map sweep coordinates back to the original image frame."""
+    out = p.copy()
+    if flip:
+        out[..., 0] = -out[..., 0]
+    if transpose:
+        out = out[..., ::-1]
+    return out
+
+
+def sweep(f_img: Image, mu_img: Image, grid: BDGrid, *, flip: bool = False,
+          transpose: bool = False, order: int = 4, gl_order: int = 8,
+          img_order: int = 4, name: str = "") -> BDSweep:
+    """One family: build the base level and double up to the full width."""
+    fo = _oriented(f_img, flip, transpose)
+    mo = _oriented(mu_img, flip, transpose)
+    tri = build_level(fo, mo, grid, 0, gl_order=gl_order, img_order=img_order)
+    for k in range(grid.levels[-1].index):
+        tri = refine(tri, grid, k, order=order)
+
+    lv = grid.top
+    M = np.arange(-lv.rise, lv.rise + 1)
+    y = grid.y_axis.nodes
+    zeros = np.zeros((y.size, M.size))
+    p0 = np.stack([zeros + grid.x0, y[:, None] + zeros], axis=-1)
+    p1 = np.stack([zeros + grid.x0 + lv.length,
+                   y[:, None] + (M * grid.h)[None, :]], axis=-1)
+    arc = np.sqrt(lv.length**2 + (M * grid.h) ** 2)
+    return BDSweep(name=name, triple=Triple(S=tri.S[0], E=tri.E[0], I=tri.I[0]),
+                   p0=_to_image_frame(p0, flip, transpose),
+                   p1=_to_image_frame(p1, flip, transpose), arc=arc)
+
+
+def forward(f_img: Image, mu_img: Image, *, sigma: int = 1, order: int = 4,
+            gl_order: int = 8, img_order: int = 4,
+            n_levels: int | None = None,
+            half_width: float = 1.0) -> dict[str, BDSweep]:
+    """Attenuated transform over all four direction families.
+
+    Returns one :class:`BDSweep` per family, each carrying the segment endpoints
+    so the result can be checked line by line against any reference.
+    """
+    if f_img.x_axis != mu_img.x_axis or f_img.y_axis != mu_img.y_axis:
+        raise ValueError("f and mu must live on the same grid")
+    grid = build_grid(half_width=half_width, image_h=f_img.h, sigma=sigma,
+                      n_levels=n_levels)
+    return {
+        name: sweep(f_img, mu_img, grid, flip=flip, transpose=tr, order=order,
+                    gl_order=gl_order, img_order=img_order, name=name)
+        for name, flip, tr in SWEEPS
+    }
