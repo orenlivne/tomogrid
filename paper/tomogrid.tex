@@ -39,11 +39,14 @@ attenuated Radon transform}
 The forward operator of emission tomography is the attenuated Radon transform,
 in which the attenuation enters through an exponential whose argument varies
 along the line of integration. Evaluating it on an $n^d$ grid for all
-significantly different lines costs $\bigO(N^{1+1/d})$ operations by direct
-quadrature, where $N = n^d$, and this evaluation is the inner loop of every
-iterative reconstruction method. We give an
-$\bigO(N \log N \log(1/\varepsilon))$ algorithm for a prescribed accuracy
-$\varepsilon$, by carrying the recursive length-doubling construction of Brandt
+significantly different lines costs $\bigO(n^{2d-1})$ operations by direct
+quadrature --- one factor of $n$ for each of the $2(d-1)$ parameters of a line,
+and one more for traversing it --- and this evaluation is the inner loop of
+every iterative reconstruction method. We give an
+algorithm that removes the traversal factor, costing
+$\bigO(N \log N \log(1/\varepsilon))$ in two dimensions for a prescribed
+accuracy $\varepsilon$, and in three dimensions the size of the output itself,
+by carrying the recursive length-doubling construction of Brandt
 and Dym for plain line integrals over to the attenuated case. Two ingredients
 make the transfer work. An exact concatenation identity for a triple of segment
 integrals lets the integration length double from level to level with no
@@ -149,9 +152,25 @@ variant \citep{hudsonlarkin1994} applies \eqref{eq:mlem} over subsets of
 directions in sequence, which makes it a block row-action scheme in the family
 of algebraic reconstruction techniques \citep{gordon1970}, i.e.\ a Kaczmarz
 relaxation with a nonlinear update. Every sweep of every one of these methods
-applies $\Rmu$ once and its adjoint once. The cost of the reconstruction is
-therefore a small multiple of the cost of evaluating $\Rmu$, and an
-$\bigO(N^{3/2})$ evaluation caps the resolution that is reachable.
+applies $\Rmu$ once and its adjoint once, so the cost of the reconstruction is
+a small multiple of the cost of evaluating $\Rmu$.
+
+The exponent alone understates what is at stake. Direct quadrature costs
+$\bigO(n^{2d-1})$ and the algorithm below costs $\bigO(n^{2d-2}\log n)$ in two
+dimensions and $\bigO(n^{2d-2})$ in three, so the saving is not the gap between
+one power of $N$ and another but a single factor of $n$ --- the number of
+samples taken along each line --- reduced to $\bigO(\log n)$ or removed. At
+$n = 512$ that factor is $512$, and it multiplies the number of sweeps.
+
+That the projector and its adjoint dominate iterative reconstruction in
+practice is not in dispute. On the HRRT brain scanner a CPU reconstruction took
+days, which kept a high-sensitivity instrument out of routine use until a GPU
+implementation brought one OSEM iteration with sixteen subsets to $16$\,s, a
+speed-up of about $125$ \citep{kimye2011}; and projection is enough of the cost
+that it is maintained as a separate, dedicated library
+\citep{parallelproj2024}. Those are engineering responses --- more arithmetic
+per second --- to a cost that is algorithmic. A faster projector composes with
+them rather than competing.
 
 Two further considerations motivate a multilevel evaluation specifically
 rather than any fast evaluation. First, if $\mu$ is not measured separately
@@ -322,7 +341,15 @@ level \emph{is} the output.
 \subsection{Indexing}
 
 Everything turns on how segments are indexed. Let $H$ be the data mesh and
-$h \le H$ the integration mesh transverse to the sweep. For the family of
+$h \le H$ the integration mesh transverse to the sweep; their ratio
+\begin{equation}
+  \sigma = H/h \ \ (\ge 1)
+  \label{eq:sigma}
+\end{equation}
+is the single parameter controlling how finely the tables are sampled relative
+to the data, and is the paper's $H/h$. It is the main accuracy knob: the error
+of one interpolation is $\bigO(\sigma^{-p})$ and the work is
+$\bigO(\sigma^{2(d-1)})$. For the family of
 directions within $45^\circ$ of $+x$, a segment of horizontal extent $L$ runs
 from a mesh point $(x_i, y_j)$ to $(x_i + L,\, y_j + m h)$ with $m$ an
 \emph{integer}. Its slope is $mh/L$, so directions are equispaced in $\tan\theta$
@@ -414,7 +441,7 @@ With \eqref{eq:flat} the table size is the same at every level, there are
 $l \approx \log n$ levels, and \eqref{eq:double} costs $\bigO(p)$ per integral,
 so in two dimensions
 \begin{equation}
-  W = \bigO(p\,\sigma^2 N \log N), \qquad \sigma = H/h .
+  W = \bigO(p\,\sigma^2 N \log N) .
 \end{equation}
 The error of one interpolation is $\bigO((h/H)^p) = \bigO(\sigma^{-p})$; over
 $l$ levels, reaching a prescribed accuracy $\varepsilon$ requires
@@ -532,7 +559,9 @@ Table~\ref{tab:refine2d} refines the grid at fixed parameters, which is where
 \caption{Refinement at $p=4$, $\sigma=2$, all four families. ``lines'' is the
 number of attenuated line integrals produced. Each row doubles $n$, so $N$
 quadruples: a pure $\bigO(N)$ method would multiply the work by exactly four and
-an $\bigO(N^{3/2})$ one by eight.}
+an $\bigO(N^{3/2})$ one by eight. The error at $n=513$ is measured on every
+fourth offset and every eighth slope; the reference costs far more than the
+transform it checks.}
 \label{tab:refine2d}
 \begin{tabular}{rrr rrr}
 \toprule
@@ -542,17 +571,24 @@ $33$  & $3.67\!\times\!10^{-2}$ & ---    & $33\,540$    & $9.2$   & ---\\
 $65$  & $1.21\!\times\!10^{-2}$ & $1.60$ & $132\,612$   & $41.0$  & $4.46$\\
 $129$ & $2.26\!\times\!10^{-3}$ & $2.42$ & $527\,364$   & $180.8$ & $4.41$\\
 $257$ & $2.95\!\times\!10^{-4}$ & $2.94$ & $2\,103\,300$ & $791.1$ & $4.37$\\
+$513$ & $1.70\!\times\!10^{-5}$ & $4.12$ & $8\,400\,900$ & $3438.4$ & $4.35$\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The work ratios are $4.46$, $4.41$, $4.37$ against the $4$ of a linear method
-and the $8$ of direct quadrature: this is $\bigO(N\log N)$ measured, with the
-logarithm visible as the slow drift above four and decreasing because the
-level count grows only as $\log n$. The error converges at an order rising
-through $1.60$, $2.42$, $2.94$ towards the fourth order of the cubic image
-interpolant. At $n=257$ the transform delivers $2.1$ million attenuated line
-integrals in $10.3$\,s.
+The work ratios are $4.46$, $4.41$, $4.37$, $4.35$, against the $4$ of a linear
+method and the $8$ of direct quadrature: this is $\bigO(N \log N)$ measured, the
+logarithm visible as the drift above four, itself decreasing because the level
+count grows only as $\log n$. The error converges at an order rising through
+$1.60$, $2.42$, $2.94$ to $4.12$ --- the fourth order of the cubic image
+interpolant, reached. At $n = 513$ the transform delivers $8.4$ million
+attenuated line integrals in $54$\,s.
+
+Against direct quadrature on the same lines, with the same number of samples
+per line as the grid has cells, the measured ratios are $2.7$, $6.0$ and $7.9$
+at $n = 65$, $129$ and $257$ --- roughly doubling with $n$, which is the
+$n/\log n$ of Section~\ref{sec:complexity} rather than any difference of
+exponents.
 
 \subsection{Three dimensions}
 \label{sec:3d}
@@ -654,29 +690,11 @@ schedule introduces stays an order of magnitude below the discretisation error
 of the grid and converges with it, at a cost already several times below direct
 evaluation at moderate resolution and improving as $\bigO(\sqrt{N}/\log N)$.
 
-\subsection*{Acknowledgements}
+\subsection*{Code}
 
-The construction extends the multilevel integral-transform framework
-of~\citep{brandtlubrecht1990,brandt1991} and the segment-doubling idea
-of~\citep{brandtdym1999} to the attenuated case.
-
-\subsection*{Reproducibility}
-
-Every number, table and figure in Section~\ref{sec:results} is generated from
-committed data by the scripts in~\citep{tomogrid}:
-
-\begin{verbatim}
-  python -m pytest tests -q --runslow   # verification suite
-  python -m experiments.scaling         # Tables 2-4, Figures 1-2
-  python -m experiments.battery         # Table 1
-  cd paper && make                      # rebuild this document from the CSVs
-\end{verbatim}
-
-\noindent
-The experiment scripts write CSV files to \texttt{experiments/results/};
-\texttt{paper/make\_tables.py} and \texttt{paper/make\_figures.py} read those
-files and emit the tables and figures, so no number in this paper is
-transcribed by hand.
+The reference implementation, the reproduction of \citep{brandtdym1999}, the
+test suite and the scripts producing every number above are
+at~\citep{tomogrid}; its README lists the commands.
 
 \bibliographystyle{plainnat}
 \bibliography{refs}

@@ -93,26 +93,39 @@ python -m pytest tests -q              # fast suite
 python -m pytest tests -q --runslow    # + convergence studies and the full 36-case battery
 ```
 
-## Experiments and paper
+## Reproducing everything
 
 ```
-python -m experiments.scaling      # refinement + knob study + cost model -> experiments/results/
-python -m experiments.battery      # 36-phantom algorithmic error table
-cd paper && make                   # rebuild tomogrid_built.pdf from those CSVs
+pip install numpy pytest                  # matplotlib and a TeX install for the paper
+
+python -m pytest tests -q                 # fast suite
+python -m pytest tests -q --runslow       # + convergence studies
+
+python -m bdlines.experiments 1           # Brandt-Dym Table 1 reproduction
+python -m bdlines.experiments 2           #   "        Table 2
+python -m experiments.spect_bd            # attenuated transform: accuracy vs work, 2-D
+python -m experiments.spect_bd_513        #   one more refinement point at n = 513
+python -m experiments.scaling3d           # 3-D
+
+cd paper && make                          # build tomogrid.pdf
 ```
 
-`paper/tomogrid.tex` is the source with `INPUT_*` placeholders;
-`paper/make_tables.py` substitutes tables generated from the measured CSVs into
-`paper/tomogrid_built.tex`, so every number in the paper comes from committed
-data. Measured results, at `n_theta = n-1`, `n_s = n`, `n_theta_min = 16`:
+Results land in `experiments/results/` and `bdlines/results/` as CSV, and the
+paper cites this repository rather than restating the commands.
 
-| n | e_alg | e_disc | e_tot | ML Gflop | direct Gflop | ML s | direct s |
-|---|---|---|---|---|---|---|---|
-| 33  | 2.05e-3 | 2.45e-2 | 2.42e-2 | 0.07 | 0.09 | 0.5 | 1.3 |
-| 65  | 4.50e-4 | 5.97e-3 | 5.92e-3 | 0.38 | 0.68 | 3.8 | 9.0 |
-| 129 | 1.38e-4 | 7.74e-4 | 7.65e-4 | 1.90 | 5.41 | 15.4 | 69.0 |
-| 257 | —       | —       | 7.67e-5 | 9.20 | 43.12 | 77.8 | — |
+## Measured, 2-D, all four direction families
 
-`e_alg` is multilevel vs direct evaluation on the same discretisation (what the
-schedule costs), `e_disc` is direct vs the continuum, `e_tot` is multilevel vs
-the continuum.
+| n | error | order | lines | Mflop | work ratio |
+|---|---|---|---|---|---|
+| 33  | 3.67e-2 | —    | 33,540    | 9.2    | — |
+| 65  | 1.21e-2 | 1.60 | 132,612   | 41.0   | 4.46 |
+| 129 | 2.26e-3 | 2.42 | 527,364   | 180.8  | 4.41 |
+| 257 | 2.95e-4 | 2.94 | 2,103,300 | 791.1  | 4.37 |
+| 513 | 1.70e-5 | 4.12 | 8,400,900 | 3438.4 | 4.35 |
+
+Each row doubles `n`, so `N` quadruples: a pure `O(N)` method would multiply the
+work by exactly four, an `O(N^1.5)` one by eight. The error reaches the fourth
+order of the cubic image interpolant.
+
+Against direct quadrature on the same lines: 2.7x, 6.0x, 7.9x at n = 65, 129,
+257 — roughly doubling with `n`.
