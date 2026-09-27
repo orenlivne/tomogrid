@@ -14,13 +14,13 @@ import numpy as np
 from .axis import Axis
 
 
-def lagrange_weights(u: np.ndarray, order: int) -> np.ndarray:
+def lagrange_weights(u: np.ndarray, order: int, xp=np) -> np.ndarray:
     """Lagrange basis weights at local coordinate ``u`` for nodes ``0..order-1``.
 
     Returns an array of shape ``(order,) + u.shape``.
     """
-    u = np.asarray(u, dtype=float)
-    w = np.ones((order,) + u.shape, dtype=float)
+    u = xp.asarray(u, dtype=float)
+    w = xp.ones((order,) + u.shape, dtype=float)
     for k in range(order):
         for m in range(order):
             if m != k:
@@ -29,7 +29,7 @@ def lagrange_weights(u: np.ndarray, order: int) -> np.ndarray:
 
 
 def stencil(
-    x: np.ndarray, axis: Axis, order: int, mode: str = "zero"
+    x: np.ndarray, axis: Axis, order: int, mode: str = "zero", xp=np
 ) -> tuple[np.ndarray, np.ndarray]:
     """Interpolation stencil for targets ``x`` on ``axis``.
 
@@ -49,23 +49,23 @@ def stencil(
         raise ValueError(f"order must be >= 1, got {order}")
     if mode not in ("zero", "shift"):
         raise ValueError(f"mode must be 'zero' or 'shift', got {mode!r}")
-    x = np.asarray(x, dtype=float)
+    x = xp.asarray(x, dtype=float)
     tau = (x - axis.origin) / axis.h
     # Left-most stencil node, chosen so the stencil straddles x.
-    i0 = np.floor(tau).astype(np.int64) - (order // 2 - 1 if order > 1 else 0)
+    i0 = xp.floor(tau).astype(xp.int64) - (order // 2 - 1 if order > 1 else 0)
     if axis.n < order:
         # Degenerate axis: fall back to what fits, anchored at 0.
-        i0 = np.zeros_like(i0)
+        i0 = xp.zeros_like(i0)
     elif mode == "shift":
-        i0 = np.clip(i0, 0, axis.n - order)
+        i0 = xp.clip(i0, 0, axis.n - order)
     u = tau - i0
-    w = lagrange_weights(u, order)
-    k = np.arange(order).reshape((order,) + (1,) * x.ndim)
+    w = lagrange_weights(u, order, xp=xp)
+    k = xp.arange(order).reshape((order,) + (1,) * x.ndim)
     idx = i0[None, ...] + k
     if mode == "zero":
         oob = (idx < 0) | (idx >= axis.n)
-        w = np.where(oob, 0.0, w)
-        idx = np.clip(idx, 0, axis.n - 1)
+        w = xp.where(oob, 0.0, w)
+        idx = xp.clip(idx, 0, axis.n - 1)
     return idx, w
 
 
@@ -82,13 +82,14 @@ def interp2d(
     x1: np.ndarray,
     order0: int,
     order1: int,
+    xp=np,
 ) -> np.ndarray:
     """Interpolate a 2-D table ``values[i0, i1]`` at scattered ``(x0, x1)``."""
     if values.shape != (axis0.n, axis1.n):
         raise ValueError(f"values shape {values.shape} != ({axis0.n}, {axis1.n})")
-    i0, w0 = stencil(x0, axis0, order0)
-    i1, w1 = stencil(x1, axis1, order1)
-    out = np.zeros(np.broadcast(x0, x1).shape, dtype=float)
+    i0, w0 = stencil(x0, axis0, order0, xp=xp)
+    i1, w1 = stencil(x1, axis1, order1, xp=xp)
+    out = xp.zeros(np.broadcast_shapes(x0.shape, x1.shape), dtype=float)
     for a in range(order0):
         for b in range(order1):
             out += w0[a] * w1[b] * values[i0[a], i1[b]]
@@ -149,6 +150,7 @@ def interp3d_stacked(
     order0: int,
     order1: int,
     order2: int,
+    xp=np,
 ) -> np.ndarray:
     """3-D analogue of :func:`interp2d_stacked`.
 
@@ -156,10 +158,10 @@ def interp3d_stacked(
     broadcasts against the targets, selecting which slab each one reads from.
     Used for the ``(s1, s2, t)`` tables of the three-dimensional transform.
     """
-    i0, w0 = stencil(x0, axis0, order0)
-    i1, w1 = stencil(x1, axis1, order1)
-    i2, w2 = stencil(x2, axis2, order2)
-    out = np.zeros(np.broadcast(x0, x1, x2).shape, dtype=float)
+    i0, w0 = stencil(x0, axis0, order0, xp=xp)
+    i1, w1 = stencil(x1, axis1, order1, xp=xp)
+    i2, w2 = stencil(x2, axis2, order2, xp=xp)
+    out = xp.zeros(np.broadcast_shapes(x0.shape, x1.shape, x2.shape), dtype=float)
     for a in range(order0):
         wa = w0[a]
         for b in range(order1):
@@ -178,15 +180,16 @@ def interp3d(
     x1: np.ndarray,
     x2: np.ndarray,
     order: int,
+    xp=np,
 ) -> np.ndarray:
     """Interpolate a 3-D field at scattered points, with zero-fill outside."""
     if values.shape != (axis0.n, axis1.n, axis2.n):
         raise ValueError(f"values shape {values.shape} != "
                          f"({axis0.n}, {axis1.n}, {axis2.n})")
-    i0, w0 = stencil(x0, axis0, order)
-    i1, w1 = stencil(x1, axis1, order)
-    i2, w2 = stencil(x2, axis2, order)
-    out = np.zeros(np.broadcast(x0, x1, x2).shape, dtype=float)
+    i0, w0 = stencil(x0, axis0, order, xp=xp)
+    i1, w1 = stencil(x1, axis1, order, xp=xp)
+    i2, w2 = stencil(x2, axis2, order, xp=xp)
+    out = xp.zeros(np.broadcast_shapes(x0.shape, x1.shape, x2.shape), dtype=float)
     for a in range(order):
         for b in range(order):
             wab = w0[a] * w1[b]

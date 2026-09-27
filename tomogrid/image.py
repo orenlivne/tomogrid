@@ -24,7 +24,7 @@ class Image:
     y_axis: Axis
 
     def __post_init__(self) -> None:
-        if self.values.shape != (self.x_axis.n, self.y_axis.n):
+        if tuple(self.values.shape) != (self.x_axis.n, self.y_axis.n):
             raise ValueError(
                 f"values shape {self.values.shape} != "
                 f"({self.x_axis.n}, {self.y_axis.n})"
@@ -37,8 +37,17 @@ class Image:
             raise ValueError("anisotropic image grids are not supported")
         return self.x_axis.h
 
-    def sample(self, x: np.ndarray, y: np.ndarray, order: int = 4) -> np.ndarray:
-        return interp2d(self.values, self.x_axis, self.y_axis, x, y, order, order)
+    def sample(self, x: np.ndarray, y: np.ndarray, order: int = 4,
+               xp=np) -> np.ndarray:
+        return interp2d(self.values, self.x_axis, self.y_axis, x, y, order,
+                        order, xp=xp)
+
+    def to(self, xp) -> "Image":
+        """The same image with its samples in ``xp``'s memory."""
+        if xp is np:
+            return self
+        return Image(values=xp.asarray(self.values), x_axis=self.x_axis,
+                     y_axis=self.y_axis)
 
 
 def sample_function(fun, x_axis: Axis, y_axis: Axis) -> Image:
@@ -66,7 +75,7 @@ class Image3D:
 
     def __post_init__(self) -> None:
         want = (self.x_axis.n, self.y_axis.n, self.z_axis.n)
-        if self.values.shape != want:
+        if tuple(self.values.shape) != want:
             raise ValueError(f"values shape {self.values.shape} != {want}")
 
     @property
@@ -76,11 +85,18 @@ class Image3D:
             raise ValueError("anisotropic image grids are not supported")
         return hs[0]
 
-    def sample(self, x, y, z, order: int = 4) -> np.ndarray:
+    def sample(self, x, y, z, order: int = 4, xp=np) -> np.ndarray:
         from .interp import interp3d
 
         return interp3d(self.values, self.x_axis, self.y_axis, self.z_axis,
-                        x, y, z, order)
+                        x, y, z, order, xp=xp)
+
+    def to(self, xp) -> "Image3D":
+        """The same volume with its samples in ``xp``'s memory."""
+        if xp is np:
+            return self
+        return Image3D(values=xp.asarray(self.values), x_axis=self.x_axis,
+                       y_axis=self.y_axis, z_axis=self.z_axis)
 
 
 def sample_function3d(fun, x_axis: Axis, y_axis: Axis, z_axis: Axis) -> Image3D:

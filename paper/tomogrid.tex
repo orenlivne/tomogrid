@@ -654,6 +654,40 @@ because equispaced Lagrange stencils have Lebesgue constants growing like $2^p$;
 better-conditioned transfers would remove the threshold and are the natural way
 to make \eqref{eq:cost} hold uniformly.
 
+\paragraph{Mapping to a GPU.}
+Production reconstruction runs on GPUs, so the relevant question is not how
+much arithmetic the recursion saves but how much of that saving survives on
+hardware whose arithmetic is its cheapest resource. A doubling is three
+whole-array operations --- an integer shear, a $q$-tap weighted sum along the
+slope axis whose stencil and weights are constant away from the ends of the
+slope range, and a pointwise merge with one exponential --- with no scatter, no
+atomics, no data-dependent branching and no index not known before launch. It
+therefore ports to a device by choosing an array namespace, which is how the
+implementation is written. Counted from array shapes, the recursion moves
+three tables and performs a few dozen flops per entry: $0.71$ flops per byte,
+against balance points of $5$ to $10$ in double precision on current
+datacentre parts, so it is bandwidth-bound by an order of magnitude and its
+time is its traffic divided by memory bandwidth. At $n=513$, $\sigma=2$, the
+$8.4\times10^{6}$ segment integrals of all four families move $5.3$\,GB, a
+lower bound of $2.6$\,ms at $2$\,TB/s. Direct quadrature of the same lines
+reads an image that fits in cache and is arithmetic-bound instead, at
+$122$\,ms on the same part: a factor of $47$, doubling with every refinement as
+the $\bigO(n/\log n)$ arithmetic ratio requires, but smaller than that ratio
+because the saving is in the scarce resource for one method and the abundant
+one for the other. Where the imbalance is extreme the effect is pronounced ---
+on a consumer card with $82$ flops per byte of single-precision balance the
+same comparison gives a factor of $5$ --- which is an argument for fusing
+successive doublings so that a tile is refined twice in registers, trading
+flops back for traffic. Single precision suffices: the merge weight
+$e^{-E\ell}$ lies in $(0,1]$, so the recursion damps rather than amplifies
+roundoff, and running the whole pipeline in single precision against the
+double-precision result gives a relative deviation of $3\times10^{-7}$,
+independent of the number of levels and two to three orders of magnitude below
+the discretisation error. None of this has been measured on a device; the
+figures above are rooflines, and what has been tested is that the kernels use
+only array operations with device equivalents and that the namespace argument
+changes no digit of the result.
+
 \paragraph{The adjoint, and the inverse problem.}
 The adjoint $\Rmu^{*}$, which every method in Section~\ref{sec:motivation}
 applies once per sweep alongside the forward operator, is the transpose of the

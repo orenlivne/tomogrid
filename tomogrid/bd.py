@@ -30,6 +30,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .axis import Axis
+from .backend import to_host
 from .image import Image
 from .interp import lagrange_weights
 from .quadrature import gauss_legendre, tail_integral_matrix
@@ -119,7 +120,7 @@ def build_grid(*, half_width: float, image_h: float, sigma: int = 1,
 
 def build_level(f_img: Image, mu_img: Image, grid: BDGrid, k: int = 0, *,
                 gl_order: int = 8, img_order: int = 4,
-                transpose: bool = False) -> Triple:
+                transpose: bool = False, xp=np) -> Triple:
     """Direct quadrature of the level-``k`` segments, shape ``(n_x, n_y, n_m)``.
 
     Integrals are with respect to arc length, so that concatenation is additive.
@@ -128,22 +129,24 @@ def build_level(f_img: Image, mu_img: Image, grid: BDGrid, k: int = 0, *,
     """
     lv = grid.levels[k]
     gl_x, w = gauss_legendre(gl_order)
-    C = tail_integral_matrix(gl_order)
+    gl_x, w = xp.asarray(gl_x), xp.asarray(w)
+    C = xp.asarray(tail_integral_matrix(gl_order))
 
-    xs = grid.x_axis(lv).nodes[:, None, None, None]
-    ys = grid.y_axis.nodes[None, :, None, None]
-    rise = (np.arange(-lv.rise, lv.rise + 1) * grid.h)[None, None, :, None]
+    xs = xp.asarray(grid.x_axis(lv).nodes)[:, None, None, None]
+    ys = xp.asarray(grid.y_axis.nodes)[None, :, None, None]
+    m = xp.arange(-lv.rise, lv.rise + 1) * grid.h
+    rise = m[None, None, :, None]
     u = 0.5 * (gl_x + 1.0)[None, None, None, :]  # 0..1 along the segment
 
     px = xs + lv.length * u
     py = ys + rise * u
     if transpose:
         px, py = py, px
-    f_nodes = f_img.sample(px, py, order=img_order)
-    mu_nodes = mu_img.sample(px, py, order=img_order)
+    f_nodes = f_img.sample(px, py, order=img_order, xp=xp)
+    mu_nodes = mu_img.sample(px, py, order=img_order, xp=xp)
 
     # Arc length of the segment, per rise.
-    seg_len = np.sqrt(lv.length**2 + (np.arange(-lv.rise, lv.rise + 1) * grid.h) ** 2)
+    seg_len = xp.sqrt(lv.length**2 + m**2)
 
     # Normalised: 0.5 * sum(w_j .) is the mean over the segment, independent of
     # its arc length.  The attenuation inside the exponential is *not*
@@ -151,7 +154,7 @@ def build_level(f_img: Image, mu_img: Image, grid: BDGrid, k: int = 0, *,
     S = 0.5 * (f_nodes @ w)
     E = 0.5 * (mu_nodes @ w)
     tail = (0.5 * seg_len)[None, None, :, None] * (mu_nodes @ C.T)
-    I = 0.5 * np.einsum("...i,...i->...", w * f_nodes, np.exp(-tail))
+    I = 0.5 * xp.einsum("...i,...i->...", w * f_nodes, xp.exp(-tail))
     return Triple(S=S, E=E, I=I)
 
 
@@ -159,7 +162,7 @@ def build_level0(f_img: Image, mu_img: Image, grid: BDGrid, **kw) -> Triple:
     return build_level(f_img, mu_img, grid, 0, **kw)
 
 
-def _shear(table: np.ndarray, n_y: int) -> np.ndarray:
+def _shear(table: np.ndarray, n_y: int, xp=np) -> np.ndarray:
     """``G[i, j, m] = table[i, j + m, m]`` with zero outside the mesh.
 
     This is where the second half of each segment is read: it starts where the
@@ -167,12 +170,12 @@ def _shear(table: np.ndarray, n_y: int) -> np.ndarray:
     no interpolation.
     """
     n_m = table.shape[2]
-    m_vals = np.arange(n_m) - (n_m - 1) // 2
-    rows = np.arange(n_y)[:, None] + m_vals[None, :]
+    m_vals = xp.arange(n_m) - (n_m - 1) // 2
+    rows = xp.arange(n_y)[:, None] + m_vals[None, :]
     ok = (rows >= 0) & (rows < n_y)
-    cols = np.arange(n_m)[None, :]
-    out = table[:, np.clip(rows, 0, n_y - 1), cols]
-    return np.where(ok[None, :, :], out, 0.0)
+    cols = xp.arange(n_m)[None, :]
+    out = table[:, xp.clip(rows, 0, n_y - 1), cols]
+    return xp.where(ok[None, :, :], out, 0.0)
 
 
 def _slope_stencil(n_m_out_odd: int, n_m_in: int, order: int):
@@ -209,7 +212,8 @@ def half_arc_lengths(grid: BDGrid, k: int) -> np.ndarray:
     return np.sqrt(lv.length**2 + (0.5 * M * grid.h) ** 2)
 
 
-def refine(tri: Triple, grid: BDGrid, k: int, *, order: int = 4) -> Triple:
+def refine(tri: Triple, grid: BDGrid, k: int, *, order: int = 4,
+           xp=np) -> Triple:
     """One length doubling, level ``k`` -> ``k+1``."""
     lv, nxt = grid.levels[k], grid.levels[k + 1]
     n_y = grid.n_y
@@ -217,14 +221,14 @@ def refine(tri: Triple, grid: BDGrid, k: int, *, order: int = 4) -> Triple:
         raise ValueError(f"table {tri.shape} != {(lv.n_x, n_y, lv.n_m)}")
 
     first = [tri.S, tri.E, tri.I]
-    second = [_shear(a, n_y) for a in first]
+    second = [_shear(a, n_y, xp=xp) for a in first]
 
-    out = [np.empty((nxt.n_x, n_y, nxt.n_m)) for _ in range(3)]
+    out = [xp.empty((nxt.n_x, n_y, nxt.n_m)) for _ in range(3)]
     # x index 2i supplies the first half, 2i+1 the second.
     lo = slice(0, 2 * nxt.n_x, 2)
     hi = slice(1, 2 * nxt.n_x, 2)
 
-    half_len = half_arc_lengths(grid, k)
+    half_len = xp.asarray(half_arc_lengths(grid, k))
 
     # Even targets M = 2m: the direction already exists, so this is exact.
     Sa, Ea, Ia = (a[lo] for a in first)
@@ -232,13 +236,14 @@ def refine(tri: Triple, grid: BDGrid, k: int, *, order: int = 4) -> Triple:
     depth = Eb * half_len[None, None, 0::2]  # optical depth of the second half
     out[0][:, :, 0::2] = 0.5 * (Sa + Sb)
     out[1][:, :, 0::2] = 0.5 * (Ea + Eb)
-    out[2][:, :, 0::2] = 0.5 * (np.exp(-depth) * Ia + Ib)
+    out[2][:, :, 0::2] = 0.5 * (xp.exp(-depth) * Ia + Ib)
 
     # Odd targets M = 2m+1: interpolate the slope index, then concatenate.
     n_odd = nxt.n_m - lv.n_m
     idx, wts = _slope_stencil(n_odd, lv.n_m, order)
-    Aq = [np.zeros((nxt.n_x, n_y, n_odd)) for _ in range(3)]
-    Bq = [np.zeros((nxt.n_x, n_y, n_odd)) for _ in range(3)]
+    idx, wts = xp.asarray(idx), xp.asarray(wts)
+    Aq = [xp.zeros((nxt.n_x, n_y, n_odd)) for _ in range(3)]
+    Bq = [xp.zeros((nxt.n_x, n_y, n_odd)) for _ in range(3)]
     for a in range(idx.shape[0]):
         wa = wts[a][None, None, :]
         for s in range(3):
@@ -247,7 +252,7 @@ def refine(tri: Triple, grid: BDGrid, k: int, *, order: int = 4) -> Triple:
     depth = Bq[1] * half_len[None, None, 1::2]
     out[0][:, :, 1::2] = 0.5 * (Aq[0] + Bq[0])
     out[1][:, :, 1::2] = 0.5 * (Aq[1] + Bq[1])
-    out[2][:, :, 1::2] = 0.5 * (np.exp(-depth) * Aq[2] + Bq[2])
+    out[2][:, :, 1::2] = 0.5 * (xp.exp(-depth) * Aq[2] + Bq[2])
     return Triple(S=out[0], E=out[1], I=out[2])
 
 
@@ -311,13 +316,14 @@ def _to_image_frame(p: np.ndarray, flip: bool, transpose: bool) -> np.ndarray:
 
 def sweep(f_img: Image, mu_img: Image, grid: BDGrid, *, flip: bool = False,
           transpose: bool = False, order: int = 4, gl_order: int = 8,
-          img_order: int = 4, name: str = "") -> BDSweep:
+          img_order: int = 4, name: str = "", xp=np) -> BDSweep:
     """One family: build the base level and double up to the full width."""
-    fo = _oriented(f_img, flip, transpose)
-    mo = _oriented(mu_img, flip, transpose)
-    tri = build_level(fo, mo, grid, 0, gl_order=gl_order, img_order=img_order)
+    fo = _oriented(f_img, flip, transpose).to(xp)
+    mo = _oriented(mu_img, flip, transpose).to(xp)
+    tri = build_level(fo, mo, grid, 0, gl_order=gl_order, img_order=img_order,
+                      xp=xp)
     for k in range(grid.levels[-1].index):
-        tri = refine(tri, grid, k, order=order)
+        tri = refine(tri, grid, k, order=order, xp=xp)
 
     lv = grid.top
     M = np.arange(-lv.rise, lv.rise + 1)
@@ -327,7 +333,8 @@ def sweep(f_img: Image, mu_img: Image, grid: BDGrid, *, flip: bool = False,
     p1 = np.stack([zeros + grid.x0 + lv.length,
                    y[:, None] + (M * grid.h)[None, :]], axis=-1)
     arc = np.sqrt(lv.length**2 + (M * grid.h) ** 2)
-    return BDSweep(name=name, triple=Triple(S=tri.S[0], E=tri.E[0], I=tri.I[0]),
+    top = Triple(S=to_host(tri.S[0]), E=to_host(tri.E[0]), I=to_host(tri.I[0]))
+    return BDSweep(name=name, triple=top,
                    p0=_to_image_frame(p0, flip, transpose),
                    p1=_to_image_frame(p1, flip, transpose), arc=arc)
 
@@ -335,7 +342,7 @@ def sweep(f_img: Image, mu_img: Image, grid: BDGrid, *, flip: bool = False,
 def forward(f_img: Image, mu_img: Image, *, sigma: int = 1, order: int = 4,
             gl_order: int = 8, img_order: int = 4,
             n_levels: int | None = None,
-            half_width: float = 1.0) -> dict[str, BDSweep]:
+            half_width: float = 1.0, xp=np) -> dict[str, BDSweep]:
     """Attenuated transform over all four direction families.
 
     Returns one :class:`BDSweep` per family, each carrying the segment endpoints
@@ -347,6 +354,6 @@ def forward(f_img: Image, mu_img: Image, *, sigma: int = 1, order: int = 4,
                       n_levels=n_levels)
     return {
         name: sweep(f_img, mu_img, grid, flip=flip, transpose=tr, order=order,
-                    gl_order=gl_order, img_order=img_order, name=name)
+                    gl_order=gl_order, img_order=img_order, name=name, xp=xp)
         for name, flip, tr in SWEEPS
     }

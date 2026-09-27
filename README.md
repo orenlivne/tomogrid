@@ -79,11 +79,18 @@ reference.
 
 ## Status
 
-Done: 2-D forward transform, full test suite, cost model.
-Not done: 3-D (segment doubling is dimension-independent; the direction grid
-becomes 2-D on the sphere), and the adjoint/backprojection (the transpose of
-every step — the merge transposes to a scatter, the prolongation to
-anterpolation).
+Done: the forward transform in 2-D (`tomogrid/bd.py`) and 3-D
+(`tomogrid/bd3d.py`) on the Brandt–Dym indexing, a standalone reproduction of
+the Brandt–Dym line-integral algorithm (`bdlines/`), the full test suite, the
+cost model, and the paper.
+
+Not done: the adjoint/backprojection (the transpose of every step — the merge
+transposes to a scatter, the slope interpolation to anterpolation), the inverse
+solve, and any measurement on a GPU.
+
+The modules `hierarchy.py`, `multilevel.py`, `multilevel3d.py`, `directions.py`
+and `cost.py` are the earlier rotating-ray-frame scheme, kept because the paper
+compares against it. New work should use `bd.py` / `bd3d.py`.
 
 ## Tests
 
@@ -106,6 +113,7 @@ python -m bdlines.experiments 2           #   "        Table 2
 python -m experiments.spect_bd            # attenuated transform: accuracy vs work, 2-D
 python -m experiments.spect_bd_513        #   one more refinement point at n = 513
 python -m experiments.scaling3d           # 3-D
+python -m experiments.gpu_roofline        # traffic, roofline, fp32 vs fp64
 
 cd paper && make                          # build tomogrid.pdf
 ```
@@ -129,3 +137,21 @@ order of the cubic image interpolant.
 
 Against direct quadrature on the same lines: 2.7x, 6.0x, 7.9x at n = 65, 129,
 257 — roughly doubling with `n`.
+
+## GPUs
+
+Every kernel takes an array namespace, so the recursion runs on a device
+without a second implementation:
+
+```python
+from tomogrid.backend import resolve
+from tomogrid.bd import forward
+sweeps = forward(f, mu, sigma=2, xp=resolve("auto"))   # cupy if one is present
+```
+
+`tests/test_backend.py` asserts the kernels touch only array functions with
+CuPy equivalents and that the namespace changes no digit of the answer, and
+single precision is verified to cost only single-precision roundoff, flat in
+the number of levels. **[docs/gpu.md](docs/gpu.md)** has the traffic counts,
+the rooflines they imply, why tensor cores are the wrong target, and what is
+still unmeasured.

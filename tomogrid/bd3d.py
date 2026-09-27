@@ -27,6 +27,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .axis import Axis
+from .backend import to_host
 from .image import Image3D
 from .interp import lagrange_weights
 from .quadrature import gauss_legendre, tail_integral_matrix
@@ -96,17 +97,18 @@ def build_grid3d(*, half_width: float, image_h: float, sigma: int = 1,
 def build_level3d(f_img: Image3D, mu_img: Image3D, grid: BD3Grid, k: int = 0, *,
                   gl_order: int = 6, img_order: int = 4,
                   axes: tuple[int, int, int] = (0, 1, 2),
-                  flip: bool = False) -> Triple:
+                  flip: bool = False, xp=np) -> Triple:
     """Level-``k`` table, shape ``(n_x, n_t, n_t, n_m, n_m)``, normalised."""
     lv = grid.levels[k]
     gl_x, w = gauss_legendre(gl_order)
-    C = tail_integral_matrix(gl_order)
-    rise = np.arange(-lv.rise, lv.rise + 1) * grid.h
+    gl_x, w = xp.asarray(gl_x), xp.asarray(w)
+    C = xp.asarray(tail_integral_matrix(gl_order))
+    rise = xp.arange(-lv.rise, lv.rise + 1) * grid.h
     u = 0.5 * (gl_x + 1.0)
 
-    xs = grid.x_nodes(lv)[:, None, None, None, None, None]
-    ys = grid.t_axis.nodes[None, :, None, None, None, None]
-    zs = grid.t_axis.nodes[None, None, :, None, None, None]
+    xs = xp.asarray(grid.x_nodes(lv))[:, None, None, None, None, None]
+    ys = xp.asarray(grid.t_axis.nodes)[None, :, None, None, None, None]
+    zs = xp.asarray(grid.t_axis.nodes)[None, None, :, None, None, None]
     ms = rise[None, None, None, :, None, None]
     ps = rise[None, None, None, None, :, None]
     uu = u[None, None, None, None, None, :]
@@ -119,24 +121,24 @@ def build_level3d(f_img: Image3D, mu_img: Image3D, grid: BD3Grid, k: int = 0, *,
     coords = [None, None, None]
     for src, arr in zip(axes, (px, py, pz)):
         coords[src] = arr
-    f_nodes = f_img.sample(*coords, order=img_order)
-    mu_nodes = mu_img.sample(*coords, order=img_order)
+    f_nodes = f_img.sample(*coords, order=img_order, xp=xp)
+    mu_nodes = mu_img.sample(*coords, order=img_order, xp=xp)
 
-    arc = np.sqrt(lv.length**2 + rise[:, None] ** 2 + rise[None, :] ** 2)
+    arc = xp.sqrt(lv.length**2 + rise[:, None] ** 2 + rise[None, :] ** 2)
     S = 0.5 * (f_nodes @ w)
     E = 0.5 * (mu_nodes @ w)
     tail = (0.5 * arc)[None, None, None, :, :, None] * (mu_nodes @ C.T)
-    I = 0.5 * np.einsum("...i,...i->...", w * f_nodes, np.exp(-tail))
+    I = 0.5 * xp.einsum("...i,...i->...", w * f_nodes, xp.exp(-tail))
     return Triple(S=S, E=E, I=I)
 
 
-def _move_pair(arr, a, b):
+def _move_pair(arr, a, b, xp=np):
     """Bring axes ``a`` (position) and ``b`` (slope) to the end, in that order."""
-    return np.moveaxis(arr, (a, b), (-2, -1))
+    return xp.moveaxis(arr, (a, b), (-2, -1))
 
 
 def _shear_axis(arr: np.ndarray, pos_axis: int, slope_axis: int,
-                n_t: int) -> np.ndarray:
+                n_t: int, xp=np) -> np.ndarray:
     """Shift a position axis by its paired slope axis: ``out[.., j, .., m] =
     arr[.., j + m - R, .., m]``, zero off the mesh.
 
@@ -144,14 +146,14 @@ def _shear_axis(arr: np.ndarray, pos_axis: int, slope_axis: int,
     ever formed.  This is where the second half of each segment is read.
     """
     n_m = arr.shape[slope_axis]
-    shift = np.arange(n_m) - (n_m - 1) // 2
-    rows = np.arange(n_t)[:, None] + shift[None, :]
+    shift = xp.arange(n_m) - (n_m - 1) // 2
+    rows = xp.arange(n_t)[:, None] + shift[None, :]
     ok = (rows >= 0) & (rows < n_t)
-    rows = np.clip(rows, 0, n_t - 1)
-    cols = np.arange(n_m)[None, :]
-    work = _move_pair(arr, pos_axis, slope_axis)
-    out = np.where(ok, work[..., rows, cols], 0.0)
-    return np.moveaxis(out, (-2, -1), (pos_axis, slope_axis))
+    rows = xp.clip(rows, 0, n_t - 1)
+    cols = xp.arange(n_m)[None, :]
+    work = _move_pair(arr, pos_axis, slope_axis, xp=xp)
+    out = xp.where(ok, work[..., rows, cols], 0.0)
+    return xp.moveaxis(out, (-2, -1), (pos_axis, slope_axis))
 
 
 def _odd_weights(n_odd: int, n_in: int, order: int):
@@ -163,20 +165,21 @@ def _odd_weights(n_odd: int, n_in: int, order: int):
     return idx, lagrange_weights((m_idx + 0.5) - base, q)
 
 
-def _prolong_slope(arr: np.ndarray, axis: int, order: int) -> np.ndarray:
+def _prolong_slope(arr: np.ndarray, axis: int, order: int, xp=np) -> np.ndarray:
     """Refine one slope axis, ``n -> 2n-1``: keep the old values, interpolate
     the midpoints.  One-dimensional, so the two slope axes cost ``O(order)``
     each rather than ``O(order^2)`` together."""
     n_in = arr.shape[axis]
-    work = np.moveaxis(arr, axis, -1)
-    out = np.empty(work.shape[:-1] + (2 * n_in - 1,))
+    work = xp.moveaxis(arr, axis, -1)
+    out = xp.empty(work.shape[:-1] + (2 * n_in - 1,))
     out[..., 0::2] = work
     idx, w = _odd_weights(n_in - 1, n_in, order)
-    acc = np.zeros(work.shape[:-1] + (n_in - 1,))
+    idx, w = xp.asarray(idx), xp.asarray(w)
+    acc = xp.zeros(work.shape[:-1] + (n_in - 1,))
     for a in range(idx.shape[0]):
         acc += w[a] * work[..., idx[a]]
     out[..., 1::2] = acc
-    return np.moveaxis(out, -1, axis)
+    return xp.moveaxis(out, -1, axis)
 
 
 def half_arc3d(grid: BD3Grid, k: int) -> np.ndarray:
@@ -186,7 +189,8 @@ def half_arc3d(grid: BD3Grid, k: int) -> np.ndarray:
     return np.sqrt(lv.length**2 + r[:, None] ** 2 + r[None, :] ** 2)
 
 
-def refine3d(tri: Triple, grid: BD3Grid, k: int, *, order: int = 4) -> Triple:
+def refine3d(tri: Triple, grid: BD3Grid, k: int, *, order: int = 4,
+             xp=np) -> Triple:
     """One length doubling in three dimensions."""
     lv, nxt = grid.levels[k], grid.levels[k + 1]
     want = (lv.n_x, grid.n_t, grid.n_t, lv.n_m, lv.n_m)
@@ -198,20 +202,20 @@ def refine3d(tri: Triple, grid: BD3Grid, k: int, *, order: int = 4) -> Triple:
     first, second = [], []
     for arr in (tri.S, tri.E, tri.I):
         a = arr[lo]
-        b = _shear_axis(arr, 1, 3, grid.n_t)  # y shifted by the m slope
-        b = _shear_axis(b, 2, 4, grid.n_t)  # z shifted by the p slope
+        b = _shear_axis(arr, 1, 3, grid.n_t, xp=xp)  # y shifted by the m slope
+        b = _shear_axis(b, 2, 4, grid.n_t, xp=xp)  # z shifted by the p slope
         b = b[hi]
         for ax in (3, 4):
-            a = _prolong_slope(a, ax, order)
-            b = _prolong_slope(b, ax, order)
+            a = _prolong_slope(a, ax, order, xp=xp)
+            b = _prolong_slope(b, ax, order, xp=xp)
         first.append(a)
         second.append(b)
 
-    half = half_arc3d(grid, k)[None, None, None, :, :]
+    half = xp.asarray(half_arc3d(grid, k))[None, None, None, :, :]
     depth = second[1] * half
     return Triple(S=0.5 * (first[0] + second[0]),
                   E=0.5 * (first[1] + second[1]),
-                  I=0.5 * (np.exp(-depth) * first[2] + second[2]))
+                  I=0.5 * (xp.exp(-depth) * first[2] + second[2]))
 
 
 # --- driver ----------------------------------------------------------------
@@ -269,10 +273,11 @@ def _endpoints(grid: BD3Grid, axes, flip: bool):
 def forward3d(f_img: Image3D, mu_img: Image3D, *, sigma: int = 1,
               order: int = 4, gl_order: int = 6, img_order: int = 4,
               n_levels: int | None = None, half_width: float = 1.0,
-              families=None) -> dict[str, BD3Sweep]:
+              families=None, xp=np) -> dict[str, BD3Sweep]:
     """Attenuated 3-D X-ray transform over all six direction families."""
     grid = build_grid3d(half_width=half_width, image_h=f_img.h, sigma=sigma,
                         n_levels=n_levels)
+    f_img, mu_img = f_img.to(xp), mu_img.to(xp)
     lv = grid.top
     r = np.arange(-lv.rise, lv.rise + 1) * grid.h
     arc = np.sqrt(lv.length**2 + r[:, None] ** 2 + r[None, :] ** 2)
@@ -282,11 +287,11 @@ def forward3d(f_img: Image3D, mu_img: Image3D, *, sigma: int = 1,
     out = {}
     for name, axes, flip in wanted:
         tri = build_level3d(f_img, mu_img, grid, 0, gl_order=gl_order,
-                            img_order=img_order, axes=axes, flip=flip)
+                            img_order=img_order, axes=axes, flip=flip, xp=xp)
         for k in range(lv.index):
-            tri = refine3d(tri, grid, k, order=order)
+            tri = refine3d(tri, grid, k, order=order, xp=xp)
         p0, p1 = _endpoints(grid, axes, flip)
-        out[name] = BD3Sweep(name=name,
-                             triple=Triple(S=tri.S[0], E=tri.E[0], I=tri.I[0]),
-                             p0=p0, p1=p1, arc=arc)
+        top = Triple(S=to_host(tri.S[0]), E=to_host(tri.E[0]),
+                     I=to_host(tri.I[0]))
+        out[name] = BD3Sweep(name=name, triple=top, p0=p0, p1=p1, arc=arc)
     return out
