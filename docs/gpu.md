@@ -8,10 +8,15 @@ arithmetic for memory traffic, and traffic is what a GPU has least of relative
 to its arithmetic. That is the whole story, and the numbers below say how much
 of the algorithmic saving survives it.
 
-There is no GPU in the container these numbers were produced in, so nothing
-here is a benchmark. Everything is either counted from array shapes or
-measured on the host; the device figures are rooflines from published peak
-bandwidth and peak rate, which is a bound and is labelled as one.
+> **Nothing in this document was run on a GPU.** No CUDA device, no cloud
+> instance, no CuPy — the container has none of them. Every device number
+> below is a *roofline*: counted traffic or counted arithmetic divided by a
+> vendor's published peak figure. It bounds what a good implementation could
+> reach and says nothing about what this code does reach. The only measured
+> numbers here are the host (NumPy) timings and the single-versus-double
+> precision comparison, both labelled as such. `experiments/gpu_bench.py` is
+> the script that would produce real numbers; see
+> [Actually measuring it](#actually-measuring-it).
 
 ## What the kernels are
 
@@ -80,10 +85,33 @@ Flat in the number of levels, and two to three orders of magnitude below the
 discretisation error the method is run at. fp32 is safe, which halves the
 traffic and puts the recursion on any card.
 
+## The parallelism does not thin out with level
+
+This is the part that separates the construction from a multigrid cycle,
+where the coarse levels hold too few points to fill a device and the coarsest
+are latency-bound. Here the table is the same size at every level by
+construction: segment start positions halve exactly as directions double. At
+n = 513, `sigma = 2` the nine levels hold between 2.10 and 2.36 million
+entries per quantity per family — a spread of 12% — so every level offers
+about 2.5e7 independent outputs across three quantities and four families,
+and the last offers as many as the first. Occupancy never collapses.
+
+## The adjoint keeps the same access pattern
+
+Iterative reconstruction applies the adjoint as often as the forward
+operator, and on a GPU the transpose of a gather is usually a scatter, which
+means atomics. Not here. With `mu` fixed the operator is linear in `f` and
+the merge coefficients `exp(-E l)` are computed once in the forward sweep.
+The transpose of an integer shear is the opposite integer shear, and the
+transpose of a banded operator is banded, so the anterpolation dual to the
+slope interpolation is again an `O(p)`-tap gather over the transposed
+stencil. Same three kernels, same access pattern, same cost. Not implemented
+yet.
+
 ## Where it sits on the roofline
 
-Counted from shapes, four direction families, `sigma = 2`, `order = 4`, fp64
-(`experiments/gpu_roofline.py --counts`):
+*Counted*, four direction families, `sigma = 2`, `order = 4`, fp64
+(`experiments/gpu_roofline.py --counts`). No row is a measurement:
 
 | n | lines | base GB | recursion GB | base flop/B | recursion flop/B | live GB |
 |---|---|---|---|---|---|---|
@@ -108,7 +136,8 @@ reported CPU timings is implementation rather than algorithm.
 The comparison that matters is not flops but time, and the two methods are
 bounded by different resources. Direct quadrature of the same lines reads an
 image that fits in cache and is therefore arithmetic-bound; the recursion
-streams tables and is bandwidth-bound. Rooflines at n = 513, 8.4 M lines:
+streams tables and is bandwidth-bound. Rooflines at n = 513, 8.4 M lines. **Counted traffic and arithmetic divided
+by vendor peak figures — no device was involved in producing any cell:**
 
 | device | precision | recursion | direct | ratio |
 |---|---|---|---|---|
@@ -151,23 +180,45 @@ The tensor-product structure does pay, twice, but at the algorithm level: the
 tensor-product interpolation, which is the arithmetic-dense part that would
 keep the units busy while the recursion waits on memory.
 
-## What is not done
+## What limits it: memory, in 3-D only
 
-Measuring any of this on a device. The port is written and the portability is
-tested, but no kernel has been fused and nothing has run on hardware, so the
-rooflines above are bounds on what a good implementation could reach, not
-claims about what this code does reach. On a machine with a GPU:
+In two dimensions the working set at n = 513 is 0.68 GB in fp64, half that in
+fp32 — nothing. In three dimensions the output is itself four-dimensional:
+one direction family of six at n = 65, `sigma = 2` holds 79 GB in fp64 and 40
+GB in fp32. That is the capacity of a large device for a sixth of the
+directions of a small volume. Clinical three-dimensional work has to be
+blocked over families and over slabs of the transverse plane, which the
+construction permits — families are independent and the transverse index is
+never interpolated — or streamed. Neither is implemented.
+
+## Actually measuring it
+
+`experiments/gpu_bench.py` runs the transform on whatever device is present
+and reports wall time, counted traffic, and the effective bandwidth the two
+imply. Run it on the host first; it prints `numpy (no device)` and works,
+which is how you check it before renting anything.
 
 ```bash
-pip install cupy-cuda12x
-python -c "
-from tomogrid.backend import resolve
-from tomogrid.bd import forward
-import tomogrid.phantoms as ph
-from tomogrid.image import sample_function, square_grid
-xa, ya = square_grid(513)
-f  = sample_function(ph.ACTIVITIES['three_blobs'][0], xa, ya)
-mu = sample_function(ph.ATTENUATIONS['high_contrast'][0], xa, ya)
-print(forward(f, mu, sigma=2, xp=resolve('auto'))['+x'].triple.I.shape)
-"
+python -m experiments.gpu_bench --grids 129 257            # host, fp64
+pip install cupy-cuda12x                                   # on a CUDA box
+python -m experiments.gpu_bench --grids 257 513 --fp32     # device, fp32
 ```
+
+The number to read is the last column, the recursion's traffic over its wall
+time, against the device's published bandwidth. That ratio says how much of
+the hardware the kernels reach. A speed-up against the NumPy path would say
+almost nothing: NumPy reaches under 1 GB/s of a socket's ~100, because every
+array expression is a separate pass with its own temporaries, so any device
+would look good against it.
+
+Instances matching the three devices in the tables, for reference: an A100
+80GB is `a2-ultragpu-1g` on GCP or `p4de.24xlarge` on AWS; an H100 is
+`a3-highgpu-1g` or `p5.48xlarge`; a 4090 is not offered by either and comes
+from the smaller GPU hosts. An hour on a single A100 is enough for the whole
+2-D table.
+
+## What is not done
+
+No kernel has been fused, the adjoint is not implemented, the 3-D blocking is
+not implemented, and nothing has run on a device. The port is written and the
+portability is tested; that is all.

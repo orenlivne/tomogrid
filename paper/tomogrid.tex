@@ -168,41 +168,31 @@ days, which kept a high-sensitivity instrument out of routine use until a GPU
 implementation brought one OSEM iteration with sixteen subsets to $16$\,s, a
 speed-up of about $125$ \citep{kimye2011}; and projection is enough of the cost
 that it is maintained as a separate, dedicated library
-\citep{parallelproj2024}. Those are engineering responses --- more arithmetic
-per second --- to a cost that is algorithmic. A faster projector composes with
-them rather than competing.
+\citep{parallelproj2024}. Both are responses in hardware to a cost that is
+algorithmic.
 
-Two further considerations motivate a multilevel evaluation specifically
-rather than any fast evaluation. First, if $\mu$ is not measured separately
-but estimated jointly with $f$ from the emission data, the problem becomes
-nonlinear in $\mu$, since $\mu$ sits in the exponent; the natural solver is
-then a full approximation scheme (FAS) \citep{brandt1977} in which the
-nonlinearity is handled on a hierarchy of grids. Second, a row-action
-relaxation of \eqref{eq:inverse} is a smoother in the multigrid sense: it
-reduces the components of the residual that the fine grid resolves, and leaves
-the smooth components to be handled on coarser grids, so a full multigrid
-(FMG) cycle over the image hierarchy is the natural outer solver. The level
-hierarchy constructed here --- segment lengths paired with angular resolutions
---- is the same hierarchy such a solver would traverse, which is what makes the
-evaluation and the solver composable. We do not develop the solver in this
-paper. The present contribution is the forward evaluation; the adjoint, the
-nonlinear inversion and the FAS/FMG cycle are the subject of subsequent work
-(Section~\ref{sec:discussion}).
+A multilevel evaluation is worth more here than any fast evaluation, because
+the solver wants the same hierarchy. A row-action relaxation of
+\eqref{eq:inverse} is a smoother in the multigrid sense, and if $\mu$ is
+estimated jointly with $f$ instead of being measured separately the problem is
+nonlinear in $\mu$, calling for a full approximation scheme
+\citep{brandt1977}. The level structure built below --- segment lengths paired
+with angular resolutions --- is the hierarchy such a solver would traverse.
+This paper stops at the forward evaluation; the adjoint and the inversion are
+subsequent work (Section~\ref{sec:discussion}).
 
 \subsection{Related work and contribution}
 
 Fast summation by separating a smooth kernel on a hierarchy of grids is the
-subject of the multilevel matrix-multiplication framework of Brandt and
-Lubrecht \citep{brandtlubrecht1990} and its extension to oscillatory kernels
-\citep{brandt1991}; the fast multipole method \citep{greengardrokhlin1987}
-solves the same problem by a different decomposition. For line integrals
-specifically, Brandt and Dym \citep{brandtdym1999} gave an $\bigO(N\log N)$
-algorithm based on recursive doubling of segment length, and Brandt et al.\
+multilevel matrix-multiplication framework of Brandt and Lubrecht
+\citep{brandtlubrecht1990,brandt1991}; the fast multipole method
+\citep{greengardrokhlin1987} decomposes differently. For line integrals,
+Brandt and Dym \citep{brandtdym1999} gave an $\bigO(N\log N)$ algorithm based
+on recursive doubling of segment length, on which Brandt et al.\
 \citep{brandtmann2000} built a multilevel inversion of the unattenuated Radon
-transform on it. Fast backprojection by hierarchical decomposition, at
-$\bigO(N\log^2 N)$ \citep{basubresler2000}, and transforms built on the
-pseudopolar grid \citep{averbuch2008} achieve comparable asymptotics for the
-unattenuated transform.
+transform. Hierarchical backprojection at $\bigO(N\log^2 N)$
+\citep{basubresler2000} and pseudopolar transforms \citep{averbuch2008} reach
+comparable asymptotics, again unattenuated.
 
 The contribution here is the extension to the attenuated transform
 \eqref{eq:art}, where the smoothness of the exponent and of the integrand must
@@ -219,14 +209,14 @@ be exploited together. Specifically:
 \item a sampling analysis of the three axes (direction, transverse offset,
   position along the ray) which fixes the level schedule and shows that the
   angular refinement must be placed at the finest levels, not the coarsest;
-\item a measured account of the resulting accuracy and cost, including the
-  finding that the error budget is dominated not by the angular interpolation
-  the method is built around, but by the resampling of the tables in the
-  transverse and along-ray variables when the ray frame rotates.
+\item a measured account of accuracy and cost, and the finding that both are
+  decided by the indexing rather than by the interpolation laid over it: a
+  rotating ray frame, the obvious choice, needs $192$ gathers per table entry
+  in two dimensions and $3072$ in three, where computing the entry from the
+  image directly needs $256$ and $768$.
 \end{enumerate}
-An open-source reference implementation, together with the scripts that
-produce every number and figure below, is available
-as~\citep{tomogrid}.
+Section~\ref{sec:gpu} then asks what the construction is worth on the hardware
+reconstruction actually runs on.
 
 \section{Segment integrals and the concatenation identity}
 \label{sec:identity}
@@ -339,6 +329,7 @@ level \emph{is} the output.
 \label{sec:algorithm}
 
 \subsection{Indexing}
+\label{sec:indexing}
 
 Everything turns on how segments are indexed. Let $H$ be the data mesh and
 $h \le H$ the integration mesh transverse to the sweep; their ratio
@@ -635,6 +626,185 @@ directions, against $0.63$\,s here for all of them. The lesson is that the cost
 and the error budget of this method are both decided by the indexing, not by the
 interpolation machinery laid over it.
 
+\section{Suitability for GPU hardware}
+\label{sec:gpu}
+
+Reconstruction runs on GPUs, so the question is not only how much arithmetic
+the recursion saves, but how much of that saving survives on hardware whose
+arithmetic is its cheapest resource. This section answers it from operation
+and traffic counts.
+
+Nothing in this section was measured on a device. The counts are computed from
+array shapes and the stencil width, and can be checked against the source. The
+device figures divide those counts by published peak bandwidth and peak
+arithmetic rates. They are lower bounds on the time a good implementation
+would need, not measurements of one.
+
+\subsection{The shape of a doubling}
+
+A doubling is three operations on whole arrays of shape
+$(n_x, n_y, n_{\mathrm{slope}})$, one array for each of $S$, $E$ and $I$.
+\begin{enumerate}
+\item \emph{An integer shear}, $G[i,j,m] = T[i,j+m,m]$, zero off the mesh.
+  This is where the second half of each segment is read: it starts where the
+  first half ended, so its transverse index moves with the slope index. The
+  indices are known before the kernel runs. At fixed $m$ the operation is a
+  shift of a contiguous plane, so the reads coalesce.
+\item \emph{A $p$-tap weighted sum along the slope axis}, for the directions
+  that do not exist one level down. Away from the two ends of the slope range
+  the offsets and the weights are the same for every target. For $p=4$ they
+  are $(-1,0,1,2)$ and
+  $(-\tfrac{1}{16}, \tfrac{9}{16}, \tfrac{9}{16}, -\tfrac{1}{16})$. The
+  interior is therefore a constant-coefficient convolution, and only
+  $\bigO(p)$ columns at each end are one-sided.
+\item \emph{A pointwise merge}, \eqref{eq:merge_norm}: eight flops and one
+  exponential per entry.
+\end{enumerate}
+Nothing scatters. Nothing needs an atomic. Nothing branches on a value, and no
+index is computed from one. The only loops are over the $p$ taps, and $p$ is
+fixed before the kernels run. A device implementation is the same source with a
+different array namespace, which is how the reference implementation is
+written.
+
+\subsection{The parallelism does not thin out with level}
+
+This is what separates the construction from a multigrid cycle. In a cycle the
+coarse levels hold too few points to fill a device, and the coarsest levels are
+latency-bound; much of the literature on multigrid for GPUs is about that
+problem. Here the table is the same size at every level, by construction: the
+number of segment start positions halves exactly as the number of directions
+doubles (Section~\ref{sec:indexing}). At $n=513$, $\sigma=2$ the nine levels
+hold between $2.10$ and $2.36$ million entries per quantity per family, a
+spread of $12\%$. Every level therefore presents about $2.5\times10^{7}$
+independent outputs across the three quantities and the four families, and the
+last presents as many as the first. Occupancy does not collapse anywhere in
+the recursion.
+
+\subsection{The adjoint keeps the same access pattern}
+
+Every iterative method in Section~\ref{sec:motivation} applies $\Rmu^{*}$ as
+often as $\Rmu$. On a GPU the transpose of a gather is usually a scatter,
+which means atomics and contention; this is the standard reason backprojection
+is harder to parallelise than projection. It does not happen here. With $\mu$
+fixed, $\Rmu$ is linear in $f$ and the merge coefficients $e^{-E\ell}$ are
+computed once in the forward sweep. The transpose of an integer shear is the
+opposite integer shear. The transpose of a banded operator is banded, so the
+anterpolation dual to the slope interpolation is again a gather, with
+$\bigO(p)$ taps read through the transposed stencil. The adjoint is thus the
+same three kernels with the same access pattern, at the same cost.
+
+\subsection{Where the recursion sits on the roofline}
+
+Table~\ref{tab:gpucounts} counts the traffic. Two figures matter. The base
+level interpolates both fields at every Gauss point of every short segment,
+out of an image of a few megabytes that stays in cache; it runs at $35.7$
+flops per byte and is arithmetic-dense. The recursion is the opposite. A
+doubling reads three tables, writes three tables, and performs about fifty
+flops on each entry, so it runs at $0.71$ flops per byte. Current parts
+balance at $4.8$ (A100) to $10.1$ (H100) flops per byte in double precision,
+so the recursion is bandwidth-bound by an order of magnitude and its time is
+its traffic divided by memory bandwidth.
+
+\begin{table}[t]
+\centering\small
+\caption{Counted from array shapes, all four direction families, $p=4$,
+$\sigma=2$, double precision. ``base'' and ``recursion'' are the two halves of
+the algorithm; $f/B$ is flops per byte of traffic, with one exponential
+charged twenty flops. ``live'' is the largest working set, three tables of
+three quantities. No entry is a measurement.}
+\label{tab:gpucounts}
+\begin{tabular}{rr rr rr r}
+\toprule
+$n$ & lines & base GB & recursion GB & base $f/B$ & recursion $f/B$ & live GB\\
+\midrule
+$65$  & $132{,}612$   & $0.005$ & $0.049$ & $35.7$ & $0.70$ & $0.011$\\
+$129$ & $527{,}364$   & $0.018$ & $0.235$ & $35.7$ & $0.71$ & $0.043$\\
+$257$ & $2{,}103{,}300$ & $0.074$ & $1.090$ & $35.7$ & $0.71$ & $0.170$\\
+$513$ & $8{,}400{,}900$ & $0.294$ & $4.962$ & $35.7$ & $0.71$ & $0.680$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The comparison against direct quadrature therefore does not reduce to the
+arithmetic ratio. Direct quadrature of the same lines reads an image that fits
+in cache, so it is arithmetic-bound; the recursion streams tables, so it is
+bandwidth-bound. The two are limited by different resources, and the resource
+the recursion saves is the one the machine has most of.
+Table~\ref{tab:gpuroof} gives both rooflines at $n=513$.
+
+\begin{table}[t]
+\centering\small
+\caption{Rooflines at $n=513$, $8.4\times10^{6}$ line integrals, four
+families: counted traffic and arithmetic divided by published peak figures.
+``ML'' is the algorithm of this paper, ``direct'' is quadrature of the same
+lines. The bound is memory (m) or arithmetic (c). Lower bounds, not
+measurements.}
+\label{tab:gpuroof}
+\begin{tabular}{l r rr rr r}
+\toprule
+device & balance ($f/B$) & \multicolumn{2}{c}{ML} &
+\multicolumn{2}{c}{direct} & ratio\\
+\midrule
+A100 80GB SXM, fp64 & $4.8$  & $2.6$\,ms  & (m) & $122$\,ms & (c) & $47$\\
+A100 80GB SXM, fp32 & $9.6$  & $1.3$\,ms  & (m) & $53.7$\,ms & (c) & $42$\\
+H100 SXM5, fp64     & $10.1$ & $1.6$\,ms  & (m) & $34.9$\,ms & (c) & $22$\\
+H100 SXM5, fp32     & $20.0$ & $0.8$\,ms  & (m) & $15.6$\,ms & (c) & $20$\\
+RTX 4090, fp64      & $1.3$  & $10.9$\,ms & (c) & $919$\,ms & (c) & $84$\\
+RTX 4090, fp32      & $81.9$ & $2.6$\,ms  & (m) & $12.7$\,ms & (c) & $5$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The ratio doubles with every refinement, as the $\bigO(n/\log n)$ arithmetic
+ratio requires, but it is smaller than that ratio and it depends on the
+machine. The last row is the instructive one. A consumer card pairs
+$82.6$\,Tflop/s of single precision with $1$\,TB/s of bandwidth, a balance of
+$82$ flops per byte, so brute force is almost free there and the recursion
+wins only by five. Stated generally: the construction trades arithmetic for
+memory traffic, and GPU hardware has been moving the other way for a decade.
+That is an argument for fusing successive doublings, so that a tile of the
+table is refined twice while resident in registers, which trades flops back
+for traffic. At $0.71$ flops per byte there is room for it.
+
+\subsection{Single precision suffices}
+
+This matters because a consumer card runs double precision at a sixty-fourth
+of its single-precision rate. The merge weight $e^{-E\ell}$ lies in $(0,1]$,
+so the recursion damps roundoff rather than amplifying it, and the number of
+levels should not enter. Running the whole pipeline in single precision
+against the double-precision result gives a relative deviation of
+$2.6\times10^{-7}$ at five doublings, $2.6\times10^{-7}$ at six and
+$3.1\times10^{-7}$ at seven: flat in the level count, and two to three orders
+of magnitude below the discretisation error at those grids. Single precision
+halves the traffic and, by Table~\ref{tab:gpuroof}, halves the time.
+
+\subsection{What the construction does not use, and what limits it}
+
+It does not use tensor cores, and should not. The slope interpolation is a
+banded matrix applied along one axis, which invites a dense product; the
+arithmetic forbids it. The matrix has $p=4$ nonzeros per row and
+$n_{\mathrm{slope}}$ reaches $2049$, so a dense product costs some $500$ times
+the arithmetic, against the factor of eight that reduced-precision tensor
+cores return. Blocking the slope axis into tiles of $32$ softens this to
+$8.75$ times the arithmetic for eight times the rate --- a wash, at reduced
+precision, on a kernel that is bandwidth-bound in any case. The tensor-product
+structure does pay, but at the level of the algorithm: the two slope axes in
+three dimensions are refined one at a time, at $\bigO(p)$ per entry instead of
+$\bigO(p^2)$, and the base level is a tensor-product interpolation, which is
+the arithmetic-dense work that would keep the units busy while the recursion
+waits on memory.
+
+What limits the construction is memory, and only in three dimensions. In two
+dimensions the working set at $n=513$ is $0.68$\,GB in double precision and
+half that in single. In three dimensions the output is itself
+four-dimensional: one direction family of six at $n=65$, $\sigma=2$ holds
+$79$\,GB in double precision, which is the capacity of a large device, and
+$40$\,GB in single. Three-dimensional problems at clinical resolution
+therefore have to be blocked over direction families and over slabs of the
+transverse plane --- which the construction permits, since families are
+independent and the transverse index is never interpolated --- or streamed. We
+have not implemented either.
+
 \section{Discussion}
 \label{sec:discussion}
 
@@ -653,40 +823,6 @@ $p$ buys accuracy only above a threshold in $\sigma$ that grows with dimension,
 because equispaced Lagrange stencils have Lebesgue constants growing like $2^p$;
 better-conditioned transfers would remove the threshold and are the natural way
 to make \eqref{eq:cost} hold uniformly.
-
-\paragraph{Mapping to a GPU.}
-Production reconstruction runs on GPUs, so the relevant question is not how
-much arithmetic the recursion saves but how much of that saving survives on
-hardware whose arithmetic is its cheapest resource. A doubling is three
-whole-array operations --- an integer shear, a $q$-tap weighted sum along the
-slope axis whose stencil and weights are constant away from the ends of the
-slope range, and a pointwise merge with one exponential --- with no scatter, no
-atomics, no data-dependent branching and no index not known before launch. It
-therefore ports to a device by choosing an array namespace, which is how the
-implementation is written. Counted from array shapes, the recursion moves
-three tables and performs a few dozen flops per entry: $0.71$ flops per byte,
-against balance points of $5$ to $10$ in double precision on current
-datacentre parts, so it is bandwidth-bound by an order of magnitude and its
-time is its traffic divided by memory bandwidth. At $n=513$, $\sigma=2$, the
-$8.4\times10^{6}$ segment integrals of all four families move $5.3$\,GB, a
-lower bound of $2.6$\,ms at $2$\,TB/s. Direct quadrature of the same lines
-reads an image that fits in cache and is arithmetic-bound instead, at
-$122$\,ms on the same part: a factor of $47$, doubling with every refinement as
-the $\bigO(n/\log n)$ arithmetic ratio requires, but smaller than that ratio
-because the saving is in the scarce resource for one method and the abundant
-one for the other. Where the imbalance is extreme the effect is pronounced ---
-on a consumer card with $82$ flops per byte of single-precision balance the
-same comparison gives a factor of $5$ --- which is an argument for fusing
-successive doublings so that a tile is refined twice in registers, trading
-flops back for traffic. Single precision suffices: the merge weight
-$e^{-E\ell}$ lies in $(0,1]$, so the recursion damps rather than amplifies
-roundoff, and running the whole pipeline in single precision against the
-double-precision result gives a relative deviation of $3\times10^{-7}$,
-independent of the number of levels and two to three orders of magnitude below
-the discretisation error. None of this has been measured on a device; the
-figures above are rooflines, and what has been tested is that the kernels use
-only array operations with device equivalents and that the namespace argument
-changes no digit of the result.
 
 \paragraph{The adjoint, and the inverse problem.}
 The adjoint $\Rmu^{*}$, which every method in Section~\ref{sec:motivation}

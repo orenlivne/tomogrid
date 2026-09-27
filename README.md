@@ -114,6 +114,7 @@ python -m experiments.spect_bd            # attenuated transform: accuracy vs wo
 python -m experiments.spect_bd_513        #   one more refinement point at n = 513
 python -m experiments.scaling3d           # 3-D
 python -m experiments.gpu_roofline        # traffic, roofline, fp32 vs fp64
+python -m experiments.gpu_bench           # measured, on whatever device exists
 
 cd paper && make                          # build tomogrid.pdf
 ```
@@ -152,6 +153,12 @@ sweeps = forward(f, mu, sigma=2, xp=resolve("auto"))   # cupy if one is present
 `tests/test_backend.py` asserts the kernels touch only array functions with
 CuPy equivalents and that the namespace changes no digit of the answer, and
 single precision is verified to cost only single-precision roundoff, flat in
-the number of levels. **[docs/gpu.md](docs/gpu.md)** has the traffic counts,
-the rooflines they imply, why tensor cores are the wrong target, and what is
-still unmeasured.
+the number of levels.
+
+**Nothing has been run on a GPU.** The device figures in the paper and in
+docs/gpu.md are rooflines — counted traffic over vendor peak bandwidth — not
+benchmarks. `python -m experiments.gpu_bench` is the script that produces real
+numbers; on a host without a device it says so and runs under NumPy.
+**[docs/gpu.md](docs/gpu.md)** has the counts, why the parallelism does not
+thin out with level, why the adjoint stays atomic-free, why tensor cores are
+the wrong target, and what is still unmeasured.
