@@ -159,6 +159,10 @@ the number of levels.
 docs/gpu.md are rooflines — counted traffic over vendor peak bandwidth — not
 benchmarks. `python -m experiments.gpu_bench` is the script that produces real
 numbers; on a host without a device it says so and runs under NumPy.
+`tools/gcpfleet.py` rents one, runs it and deletes it, under a ledger and a
+Compute-Engine-enforced deletion deadline — see
+**[docs/gcp_runbook.md](docs/gcp_runbook.md)**, and
+`python -m tools.gcpfleet --plan` for the cost, which needs no credential.
 **[docs/gpu.md](docs/gpu.md)** has the counts, why the parallelism does not
 thin out with level, why the adjoint stays atomic-free, why tensor cores are
 the wrong target, and what is still unmeasured.
